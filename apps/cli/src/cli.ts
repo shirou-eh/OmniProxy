@@ -1,3 +1,4 @@
+import { CAPTURE_ANALYZE_USAGE, runCaptureAnalyze } from './commands/capture-analyze.js';
 import { CAPTURE_IMPORT_USAGE, runCaptureImport } from './commands/capture-import.js';
 import { CAPTURE_SANITIZE_USAGE, runCaptureSanitize } from './commands/capture-sanitize.js';
 import { EXIT_OK, EXIT_USAGE, type CliIo } from './io.js';
@@ -14,6 +15,7 @@ export const USAGE = `omniproxy — universal relay for provider web APIs
 Usage:
   omniproxy capture import <file.har> --provider <id> --scenario <name>
   omniproxy capture sanitize <bundle.json> [--out <path>]
+  omniproxy capture analyze <bundle.json> [--compare <other.json>]
 
 Run a command with --help for its options.
 
@@ -24,6 +26,7 @@ const CAPTURE_USAGE = `omniproxy capture — record and prepare provider traffic
 
   import    Read a HAR exported from browser DevTools into a capture bundle.
   sanitize  Strip credentials from a bundle and write it as a fixture.
+  analyze   Work out what each call does and how values flow between them.
 
 Recording traffic directly (capture record) arrives with PR-7.`;
 
@@ -45,6 +48,7 @@ export async function run(argv: readonly string[], io: CliIo): Promise<number> {
   if (group === 'capture') {
     if (command === 'import') return runCaptureImport(rest, io);
     if (command === 'sanitize') return runCaptureSanitize(rest, io);
+    if (command === 'analyze') return runCaptureAnalyze(rest, io);
     if (command === undefined) {
       io.err('omniproxy: capture needs a subcommand');
       io.err(CAPTURE_USAGE);
@@ -56,6 +60,8 @@ export async function run(argv: readonly string[], io: CliIo): Promise<number> {
       io.out(CAPTURE_IMPORT_USAGE);
       io.out('');
       io.out(CAPTURE_SANITIZE_USAGE);
+      io.out('');
+      io.out(CAPTURE_ANALYZE_USAGE);
       return EXIT_OK;
     }
     io.err(`omniproxy: unknown capture command "${command}"`);
