@@ -1,4 +1,5 @@
 import { CAPTURE_IMPORT_USAGE, runCaptureImport } from './commands/capture-import.js';
+import { CAPTURE_SANITIZE_USAGE, runCaptureSanitize } from './commands/capture-sanitize.js';
 import { EXIT_OK, EXIT_USAGE, type CliIo } from './io.js';
 
 /**
@@ -12,11 +13,19 @@ export const USAGE = `omniproxy — universal relay for provider web APIs
 
 Usage:
   omniproxy capture import <file.har> --provider <id> --scenario <name>
+  omniproxy capture sanitize <bundle.json> [--out <path>]
 
 Run a command with --help for its options.
 
 Under construction: the gateway itself, provider modules and the rest of the capture
 pipeline. See docs/omniproxy/04-phase-1-plan.md for what lands next.`;
+
+const CAPTURE_USAGE = `omniproxy capture — record and prepare provider traffic
+
+  import    Read a HAR exported from browser DevTools into a capture bundle.
+  sanitize  Strip credentials from a bundle and write it as a fixture.
+
+Recording traffic directly (capture record) arrives with PR-7.`;
 
 export const VERSION_LINE = 'omniproxy 0.0.0 (phase 1: capture pipeline)';
 
@@ -35,17 +44,22 @@ export async function run(argv: readonly string[], io: CliIo): Promise<number> {
 
   if (group === 'capture') {
     if (command === 'import') return runCaptureImport(rest, io);
+    if (command === 'sanitize') return runCaptureSanitize(rest, io);
     if (command === undefined) {
       io.err('omniproxy: capture needs a subcommand');
-      io.err(CAPTURE_IMPORT_USAGE);
+      io.err(CAPTURE_USAGE);
       return EXIT_USAGE;
     }
     if (command === '--help' || command === '-h') {
+      io.out(CAPTURE_USAGE);
+      io.out('');
       io.out(CAPTURE_IMPORT_USAGE);
+      io.out('');
+      io.out(CAPTURE_SANITIZE_USAGE);
       return EXIT_OK;
     }
     io.err(`omniproxy: unknown capture command "${command}"`);
-    io.err('Available now: import. Recording (capture record) arrives with PR-7.');
+    io.err(CAPTURE_USAGE);
     return EXIT_USAGE;
   }
 

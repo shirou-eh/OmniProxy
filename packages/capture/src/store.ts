@@ -1,7 +1,8 @@
 import { mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { CaptureBundle } from '@omniproxy/schema';
+import { findResidualSecretShapes, type ResidualSecret } from './sanitize.js';
 
 /**
  * Local storage for raw, unsanitized captures.
@@ -25,6 +26,18 @@ export function omniproxyHome(env: NodeJS.ProcessEnv = process.env): string {
 
 export function rawCacheDir(env: NodeJS.ProcessEnv = process.env): string {
   return join(omniproxyHome(env), 'tmp');
+}
+
+/** Where a user's own provider module lives — the same layout as a built-in one. */
+export function providerDir(providerId: string, env: NodeJS.ProcessEnv = process.env): string {
+  return join(omniproxyHome(env), 'providers', providerId);
+}
+
+export function providerFixtureDir(
+  providerId: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return join(providerDir(providerId, env), 'fixtures');
 }
 
 export interface WriteRawBundleResult {
@@ -80,4 +93,47 @@ export async function pruneRawCache(options: {
   }
 
   return removed;
+}
+
+/**
+ * The gate.
+ *
+ * A fixture is a file that ends up in git, in issues and in other people's hands.
+ * Nothing unsanitized may become one — and "sanitized" is not taken on the bundle's
+ * word: the finished text is scanned again for anything shaped like a credential
+ * before it is allowed to touch the disk. Refusing here is cheap; a leaked session in
+ * a public repository cannot be undone.
+ */
+export class FixtureRefused extends Error {
+  override readonly name = 'FixtureRefused';
+  constructor(
+    message: string,
+    readonly userAction: string,
+    readonly residues: ResidualSecret[] = [],
+  ) {
+    super(message);
+  }
+}
+
+export async function writeFixture(bundle: CaptureBundle, path: string): Promise<string> {
+  if (!bundle.sanitized) {
+    throw new FixtureRefused(
+      `Refusing to write ${path}: the bundle is not sanitized and still contains live credentials.`,
+      'Run "omniproxy capture sanitize" on it first.',
+    );
+  }
+
+  const serialized = `${JSON.stringify(bundle, null, 2)}\n`;
+  const residues = findResidualSecretShapes(serialized);
+  if (residues.length > 0) {
+    throw new FixtureRefused(
+      `Refusing to write ${path}: ${residues.length} value(s) are still shaped like a credential.`,
+      'Do not commit this bundle. Report the shape that was missed so the detector can be extended.',
+      residues,
+    );
+  }
+
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, serialized, 'utf8');
+  return path;
 }

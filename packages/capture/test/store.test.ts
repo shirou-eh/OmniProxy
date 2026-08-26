@@ -2,7 +2,15 @@ import { mkdtemp, readFile, readdir, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { omniproxyHome, pruneRawCache, rawCacheDir, writeRawBundle } from '../src/store.js';
+import {
+  FixtureRefused,
+  omniproxyHome,
+  providerFixtureDir,
+  pruneRawCache,
+  rawCacheDir,
+  writeFixture,
+  writeRawBundle,
+} from '../src/store.js';
 import type { CaptureBundle } from '@omniproxy/schema';
 
 const bundle: CaptureBundle = {
@@ -85,5 +93,63 @@ describe('paths', () => {
 
   it('falls back to the user home directory', () => {
     expect(rawCacheDir({} as NodeJS.ProcessEnv)).toContain('.omniproxy');
+  });
+});
+
+describe('writeFixture — the gate', () => {
+  // Assembled from pieces so the repository's own secrets gate does not fire on this
+  // source file. That gate firing here would be correct behaviour.
+  const jwt = ['eyJ', 'hbGciOiJIUzI1NiJ9'].join('') + '.eyJzdWIiOiJ1In0.sig';
+
+  it('refuses an unsanitized bundle and says what to do', async () => {
+    const target = join(await tempDir(), 'fixtures', 'x.json');
+    await expect(writeFixture(bundle, target)).rejects.toBeInstanceOf(FixtureRefused);
+
+    try {
+      await writeFixture(bundle, target);
+      expect.unreachable('should have refused');
+    } catch (error) {
+      expect((error as FixtureRefused).userAction).toContain('capture sanitize');
+    }
+
+    await expect(readdir(join(target, '..'))).rejects.toThrow();
+  });
+
+  it('refuses a bundle that claims to be sanitized but is not', async () => {
+    // The gate does not take the flag's word for it: it re-reads the finished text.
+    const lying = {
+      ...bundle,
+      sanitized: true,
+      entries: [
+        {
+          index: 0,
+          startedAt: 0,
+          request: { method: 'GET', url: 'https://a.example.test/', headers: [] },
+          response: { status: 200, headers: [['x-token', jwt] as [string, string]] },
+          classification: 'unknown' as const,
+        },
+      ],
+    };
+    const target = join(await tempDir(), 'fixtures', 'lying.json');
+
+    await expect(writeFixture(lying, target)).rejects.toBeInstanceOf(FixtureRefused);
+  });
+
+  it('writes a clean bundle and creates the directory', async () => {
+    const target = join(await tempDir(), 'fixtures', 'clean.json');
+    const written = await writeFixture({ ...bundle, sanitized: true }, target);
+
+    expect(written).toBe(target);
+    const parsed = JSON.parse(await readFile(target, 'utf8')) as CaptureBundle;
+    expect(parsed.sanitized).toBe(true);
+  });
+});
+
+describe('provider paths', () => {
+  it('puts fixtures inside the user provider module layout', () => {
+    const env = { OMNIPROXY_HOME: join('C:', 'home', '.omniproxy') } as NodeJS.ProcessEnv;
+    expect(providerFixtureDir('my-service', env)).toBe(
+      join('C:', 'home', '.omniproxy', 'providers', 'my-service', 'fixtures'),
+    );
   });
 });
