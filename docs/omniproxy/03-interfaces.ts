@@ -360,24 +360,40 @@ export interface CaptureBundle {
   notes: string[];
 }
 
+/**
+ * Amended in PR-1 against the implementation in packages/schema/src/capture.ts:
+ * headers are ordered pairs rather than a dictionary plus a separate order array.
+ * Order is part of the fingerprint and duplicates are real (several `set-cookie` in
+ * one response) — a dictionary loses both, and two parallel fields can disagree.
+ * Frame timings are nullable: a HAR stores a stream as one string, so only a live
+ * recorder knows when each frame arrived. Claiming a time we do not have would be
+ * an invention.
+ */
+export type HeaderPair = [name: string, value: string];
+
 export interface CaptureEntry {
   index: number;
   startedAt: number;
+  durationMs?: number;
   request: {
     method: string;
     url: string;
-    headers: Record<string, string>;
-    headerOrder: string[];
+    httpVersion?: string;
+    headers: HeaderPair[];
     body?: string;
     bodyEncoding?: 'utf8' | 'base64';
+    mimeType?: string;
   };
   response: {
     status: number;
-    headers: Record<string, string>;
+    statusText?: string;
+    headers: HeaderPair[];
     body?: string;
     bodyEncoding?: 'utf8' | 'base64';
+    mimeType?: string;
     /** Reassembled SSE / chunked frames, in arrival order. */
-    frames?: { at: number; data: string }[];
+    frames?: { at: number | null; raw: string; event?: string; data?: string; id?: string }[];
+    webSocketMessages?: { direction: 'send' | 'receive'; at: number | null; data: string }[];
   };
   /** Analyzer output. */
   classification?: 'auth' | 'session' | 'send' | 'stream' | 'poll' | 'upload'

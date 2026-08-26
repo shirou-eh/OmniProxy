@@ -15,3 +15,4 @@ export const PROVIDER_SCHEMA_VERSION = 1 as const;
 
 export * from './modality.js';
 export * from './capability.js';
+export * from './capture.js';

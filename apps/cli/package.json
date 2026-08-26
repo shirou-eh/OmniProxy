@@ -1,0 +1,26 @@
+{
+  "name": "@omniproxy/cli",
+  "version": "0.0.0",
+  "private": true,
+  "description": "omniproxy command line",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "omniproxy": "./dist/main.js"
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@omniproxy/capture": "workspace:*",
+    "@omniproxy/schema": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}
