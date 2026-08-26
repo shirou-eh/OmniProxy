@@ -300,3 +300,72 @@ allowedHosts:                   # белый список хостов, куда
 версии; `omniproxy provider migrate` переписывает декларацию автоматически там, где
 это возможно, и оставляет пометки там, где нужен человек. Модуль с неизвестной
 будущей версией помечается `unsupported-schema` и не влияет на старт остальных.
+
+## 6. Каналы, не являющиеся веб-интерфейсом (ADR-0006)
+
+### 6.1 Пять видов каналов
+
+| `kind` | Что это | Авторизация |
+|---|---|---|
+| `web-http` | эндпоинты, в которые ходит браузер | cookie из живой сессии |
+| `web-browser` | тот же сервис через Playwright | сессия браузерного профиля |
+| `gateway-protocol` | не HTTP: Discord Gateway и подобное | токен бота/пользователя |
+| `app-backend` | эндпоинт, в который ходит **десктопное приложение** | токен из локального файла состояния приложения |
+| `local-process` | чужой прокси, который OmniProxy запускает сам | его собственная, нас не касается |
+
+Порядок в `channels` остаётся порядком деградации, поэтому «сначала декларация,
+если сломалась — управляемый процесс» описывается штатно.
+
+### 6.2 `auth.kind: local-file`
+
+```yaml
+auth:
+  kind: local-file
+  harvest:
+    file:                              # пути по платформам, ADR-0005
+      win32:  "%USERPROFILE%\.someapp\request-headers.json"
+      linux:  "$HOME/.someapp/request-headers.json"
+      darwin: "$HOME/Library/Application Support/SomeApp/headers.json"
+    extract: { token: $.headers.X-Authorization }
+    watch: true                        # приложение обновляет токен само — следим за файлом
+  present:
+    headers:
+      x-authorization: "{{auth.token}}"
+```
+
+`watch: true` вместо собственного refresh — там, где токен обновляет само приложение,
+правильная работа состоит в том, чтобы её не делать. Файл читается только на чтение;
+значение попадает в credential-store и в логи только как `sha256[:8]`.
+
+### 6.3 `kind: local-process` — «принеси свой прокси»
+
+```yaml
+channels:
+  - id: managed
+    kind: local-process
+    process:
+      command: node
+      args: [./vendor/some-proxy.js]
+      env: { PORT: "{{channel.port}}" }
+      port: auto                       # свободный порт выделяем мы
+      readyWhen:
+        request: { method: GET, path: /v1/models }
+        timeoutMs: 15000
+      restart: { maxAttempts: 5, backoffMs: 1000, maxBackoffMs: 30000 }
+    speaks: openai                     # диалект, на котором отвечает процесс
+```
+
+**Требует доверия.** Запуск исполняемого файла — это исполнение кода, как `adapter.ts`:
+канал не стартует, пока пользователь не подтвердил `omniproxy provider trust <id>`,
+и хеш команды с аргументами запоминается. Декларация с `local-process` не является
+«данными» и не может расшариваться как безопасная.
+
+Запуск только через `spawn` без `shell: true`. Остановка — группа процессов на POSIX,
+`taskkill /T` по дереву на Windows.
+
+### 6.4 Профили отпечатка — именованные, а не «более браузерные»
+
+`fingerprint.profile` — это имя из реестра, а не позиция на шкале. Для провайдера под
+Cloudflare нужен `chrome-131`; для бэкенда десктопного приложения, чей WAF ждёт именно
+приложение, — `node-undici`. Ошибиться можно в обе стороны, и правильное значение
+берётся из захвата, а не из общих соображений.

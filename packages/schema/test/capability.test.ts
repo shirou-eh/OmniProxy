@@ -54,3 +54,23 @@ describe('PROVIDER_SCHEMA_VERSION', () => {
     expect(PROVIDER_SCHEMA_VERSION).toBe(1);
   });
 });
+
+describe('emulationSupport', () => {
+  const minimal = {
+    input: ['text'],
+    output: ['text'],
+    contextChars: 100_000,
+    maxOutputChars: 32_000,
+  };
+
+  it('accepts native tool calling, for app-backend channels (ADR-0006)', () => {
+    const cap = capabilitySchema.parse({ ...minimal, toolCalling: 'native' });
+    expect(cap.toolCalling).toBe('native');
+  });
+
+  it('still rejects a value that means nothing', () => {
+    expect(capabilitySchema.safeParse({ ...minimal, toolCalling: 'probably' }).success).toBe(
+      false,
+    );
+  });
+});

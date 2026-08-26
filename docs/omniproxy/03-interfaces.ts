@@ -172,12 +172,26 @@ export interface OmniError {
 
 /* ─────────────────────────────────── Adapter ─────────────────────────────────── */
 
+export type ChannelKind =
+  | 'web-http'
+  | 'web-browser'
+  | 'gateway-protocol'
+  /** The endpoint a desktop application talks to; auth comes from its local state. */
+  | 'app-backend'
+  /** A third-party proxy OmniProxy starts and supervises itself. Requires trust. */
+  | 'local-process';
+
 export interface ChannelDescriptor {
   id: string;
-  kind: 'web-http' | 'web-browser' | 'gateway-protocol';
+  kind: ChannelKind;
   /** Higher = tried first; degradation walks down this list. */
   priority: number;
-  requiresImpersonation: boolean;
+  /**
+   * Which named fingerprint profile this channel needs. Not a scale: a Cloudflare
+   * provider wants `chrome-131`, a desktop backend whose WAF expects the app wants
+   * `node-undici`. Both directions are a mistake if guessed. See ADR-0006.
+   */
+  fingerprintProfile: string;
   concurrencyPerAccount: number;
 }
 
