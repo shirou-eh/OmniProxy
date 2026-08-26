@@ -1,0 +1,11 @@
+# Cross-platform parity: LF in the repository and in every working copy,
+# on Windows and Linux alike. Prevents CRLF churn in diffs and keeps shell
+# scripts executable on Linux after a checkout from Windows.
+* text=auto eol=lf
+
+# Binary assets — never touched.
+*.wasm binary
+*.png  binary
+*.jpg  binary
+*.gz   binary
+*.zip  binary
