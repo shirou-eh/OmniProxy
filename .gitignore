@@ -14,3 +14,12 @@ data/accounts/*.json
 /tmp/deepseek_response_*
 .DS_Store
 *.pdf
+
+# --- OmniProxy build & tooling ---
+dist/
+.turbo/
+coverage/
+*.tsbuildinfo
+
+# Local runtime state: credentials, artifacts, jobs, user provider modules.
+.omniproxy/

@@ -1,0 +1,10 @@
+packages:
+  - apps/*
+  - packages/*
+  # The original FreeDeepseekAPI, kept working and untouched until phase 2 replaces it.
+  - legacy
+
+# esbuild ships a prebuilt binary for the host platform and needs its install script
+# to unpack it. Vitest depends on it. Everything else stays script-free by default.
+allowBuilds:
+  esbuild: true

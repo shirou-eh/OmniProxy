@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# ADR-0005: Windows and Linux are both first-class. A red Windows job is a red PR.
+jobs:
+  check:
+    name: check (${{ matrix.os }}, node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: [22, 24]
+    env:
+      # Hackability charter X-5: nothing phones home, not even our build tooling.
+      TURBO_TELEMETRY_DISABLED: 1
+      DO_NOT_TRACK: 1
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm run build
+
+      - run: pnpm run typecheck
+
+      - run: pnpm run test
+
+  secrets-scan:
+    name: no secrets in fixtures
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Blocking requirement from the promt, section 8.4: captured traffic and
+      # fixtures must never carry live credentials. This gate exists before the
+      # capture pipeline does, so it can never be "added later".
+      - name: Scan fixtures and committed files for credential-shaped values
+        shell: bash
+        run: |
+          set -euo pipefail
+          patterns=(
+            'eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.'   # JWT
+            '"cookie"[[:space:]]*:[[:space:]]*"[^"]{40,}"'
+            'Authorization:[[:space:]]*Bearer[[:space:]]+[A-Za-z0-9._-]{20,}'
+            'ds_session_id=[A-Za-z0-9]{16,}'
+          )
+          status=0
+          for p in "${patterns[@]}"; do
+            if git grep -nIE "$p" -- . ':!legacy/auth.example.json' ':!.github/workflows/ci.yml'; then
+              echo "::error::credential-shaped value found for pattern: $p"
+              status=1
+            fi
+          done
+          exit $status
