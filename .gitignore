@@ -1,0 +1,16 @@
+node_modules/
+.env
+*.log
+auth.json
+deepseek-auth.json
+# Aggregate account export holding live tokens/cookies — never commit.
+deepseek-accounts.json
+# Runtime-added auth files contain secrets — keep the dir, ignore its contents.
+data/accounts/*.json
+.chrome-profile-deepseek/
+.chrome-for-testing-profile-deepseek/
+.chrome-for-testing-profile-deepseek.stale-*/
+*.session.json
+/tmp/deepseek_response_*
+.DS_Store
+*.pdf
