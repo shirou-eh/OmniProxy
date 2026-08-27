@@ -2,13 +2,14 @@
 
 # OmniProxy
 
-A universal relay that puts a standard API (OpenAI / Anthropic / Gemini compatible) in
-front of provider **web interfaces** — the same endpoints your logged-in browser talks
-to — across every modality: text, images, video, audio, music, speech and 3D.
+A universal relay that puts a standard API (OpenAI / Anthropic / Gemini / Ollama
+compatible) in front of provider **web interfaces** — the same endpoints your logged-in
+browser talks to — across every modality: text, images, video, audio, music, speech
+and 3D.
 
 > **Status: rework in progress (the gateway runs).** `omniproxy serve` answers
-> OpenAI-, Anthropic- and Gemini-shaped requests over any provider module, with an
-> account pool and streaming.
+> OpenAI-, Anthropic-, Gemini- and Ollama-shaped requests over any provider module,
+> with an account pool and streaming.
 > **No provider has been verified against its live service yet** — every declaration is
 > `unverified` and runs end to end only against a protocol-faithful local simulator, so
 > whether the real service still behaves this way today is unknown. The proxy with real
@@ -27,25 +28,27 @@ pnpm run legacy:start
 ```
 
 **The OmniProxy gateway.** One server in front of every provider module found,
-speaking three client protocols at once over the same accounts:
+speaking four client protocols at once over the same accounts:
 
 | Endpoint | Protocol |
 |---|---|
 | `POST /v1/chat/completions` | OpenAI Chat Completions |
 | `POST /v1/messages` | Anthropic Messages |
 | `POST /v1beta/models/<model>:generateContent` | Gemini (and `:streamGenerateContent`) |
+| `POST /api/chat`, `POST /api/generate` | Ollama (NDJSON, plus `/api/tags` and `/api/show`) |
 
-Streaming and non-streaming on all three. Point any client at it — the SDKs, `curl`,
-an editor plugin:
+Streaming and non-streaming on all four. Point any client at it — the SDKs, `curl`,
+an editor plugin, or any of the local-first tools that speak Ollama and nothing else:
 
 ```bash
 omniproxy serve --accounts ./accounts.json
 # OPENAI_BASE_URL=http://127.0.0.1:8787/v1       OPENAI_API_KEY=unused
 # ANTHROPIC_BASE_URL=http://127.0.0.1:8787       ANTHROPIC_API_KEY=unused
 # GOOGLE_GEMINI_BASE_URL=http://127.0.0.1:8787   GEMINI_API_KEY=unused
+# OLLAMA_HOST=http://127.0.0.1:8787
 ```
 
-The three protocols share one conversation model, one account pool and one request
+The four protocols share one conversation model, one account pool and one request
 loop, so the same conversation reaches the provider as a byte-identical prompt
 whichever SDK sent it — there is a test that asserts exactly that. A key, when you set
 one, is accepted as `Authorization: Bearer`, `x-api-key`, `x-goog-api-key` or `?key=`,
@@ -90,7 +93,7 @@ client, the whole flow runs end to end against a protocol-faithful local simulat
 **nothing has been confirmed against the live service**. See
 [`docs/providers/deepseek-web.md`](docs/providers/deepseek-web.md).
 
-**779 tests**, on Windows and Linux, including golden parity tests that run the same
+**839 tests**, on Windows and Linux, including golden parity tests that run the same
 DeepSeek stream frames — and the same conversations and tool-call markup — through the
 real legacy parser and the new engine, and compare them byte for byte.
 
@@ -150,13 +153,13 @@ MIT licensed. No telemetry, no feature gating, no hosted component.
 # OmniProxy (по-русски)
 
 Универсальный ретранслятор: единый стандартный API (совместимый с OpenAI / Anthropic /
-Gemini) поверх **веб-интерфейсов** провайдеров — тех самых эндпоинтов, в которые ходит
-ваш залогиненный браузер — для всех модальностей: текст, изображения, видео, аудио,
-музыка, речь, 3D.
+Gemini / Ollama) поверх **веб-интерфейсов** провайдеров — тех самых эндпоинтов, в
+которые ходит ваш залогиненный браузер — для всех модальностей: текст, изображения,
+видео, аудио, музыка, речь, 3D.
 
 > **Статус: идёт переработка (шлюз работает).** `omniproxy serve` отвечает на запросы
-> в форматах OpenAI, Anthropic и Gemini поверх любого модуля провайдера — с пулом
-> аккаунтов и потоковой отдачей. **Ни один провайдер ещё не проверен против живого сервиса**: все
+> в форматах OpenAI, Anthropic, Gemini и Ollama поверх любого модуля провайдера — с
+> пулом аккаунтов и потоковой отдачей. **Ни один провайдер ещё не проверен против живого сервиса**: все
 > декларации имеют статус `unverified` и прогоняются целиком только против
 > протокольно достоверного локального симулятора, так что ведёт ли себя настоящий
 > сервис так же сегодня — неизвестно. Прокси с реальным пробегом по-прежнему исходный,
@@ -175,25 +178,27 @@ pnpm run legacy:start
 ```
 
 **Шлюз OmniProxy.** Один сервер поверх всех найденных модулей провайдеров, говорящий
-на трёх клиентских протоколах сразу и поверх одних и тех же аккаунтов:
+на четырёх клиентских протоколах сразу и поверх одних и тех же аккаунтов:
 
 | Эндпоинт | Протокол |
 |---|---|
 | `POST /v1/chat/completions` | OpenAI Chat Completions |
 | `POST /v1/messages` | Anthropic Messages |
 | `POST /v1beta/models/<model>:generateContent` | Gemini (и `:streamGenerateContent`) |
+| `POST /api/chat`, `POST /api/generate` | Ollama (NDJSON, плюс `/api/tags` и `/api/show`) |
 
-Потоково и нет — на всех трёх. Направьте на него любой клиент: SDK, `curl`, плагин
-редактора.
+Потоково и нет — на всех четырёх. Направьте на него любой клиент: SDK, `curl`, плагин
+редактора или любой из локальных инструментов, которые умеют только Ollama.
 
 ```bash
 omniproxy serve --accounts ./accounts.json
 # OPENAI_BASE_URL=http://127.0.0.1:8787/v1       OPENAI_API_KEY=unused
 # ANTHROPIC_BASE_URL=http://127.0.0.1:8787       ANTHROPIC_API_KEY=unused
 # GOOGLE_GEMINI_BASE_URL=http://127.0.0.1:8787   GEMINI_API_KEY=unused
+# OLLAMA_HOST=http://127.0.0.1:8787
 ```
 
-У трёх протоколов общая модель диалога, общий пул аккаунтов и общий цикл запроса,
+У четырёх протоколов общая модель диалога, общий пул аккаунтов и общий цикл запроса,
 поэтому один и тот же диалог доходит до провайдера побайтно одинаковым промптом,
 каким бы SDK его ни отправили — на это есть отдельный тест. Ключ, если вы его
 зададите, принимается как `Authorization: Bearer`, `x-api-key`, `x-goog-api-key` или
@@ -238,7 +243,7 @@ omniproxy provider draft <bundle>          # черновик provider.yaml, в�
 **против живого сервиса не подтверждено ничего**. Подробности —
 [`docs/providers/deepseek-web.md`](docs/providers/deepseek-web.md).
 
-**779 тестов**, на Windows и Linux, включая golden-тесты, которые гоняют одни и те же
+**839 тестов**, на Windows и Linux, включая golden-тесты, которые гоняют одни и те же
 кадры потока DeepSeek — и те же диалоги и ту же разметку tool-call — через настоящий
 парсер legacy и через новый движок и сравнивают результат побайтно.
 

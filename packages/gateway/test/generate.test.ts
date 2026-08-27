@@ -344,12 +344,12 @@ describe('the Gemini endpoint under failure and access control', () => {
     expect(harness.sim.sessions).toHaveLength(3);
   });
 
-  it('reports all three dialects on /health', async () => {
+  it('reports all four dialects on /health', async () => {
     const harness = await start();
     const body = (await (await fetch(`${harness.gateway.url}/health`)).json()) as {
       dialects: string[];
     };
-    expect(body.dialects).toEqual(['openai', 'anthropic', 'gemini']);
+    expect(body.dialects).toEqual(['openai', 'anthropic', 'ollama', 'gemini']);
   });
 });
 

@@ -16,6 +16,7 @@ import { anthropicDialect } from './anthropic.js';
 import type { DialectHooks, RouteContext, RequestPlan } from './dialect.js';
 import { ConcurrencyGate, gateKey, GateRefused, type Release } from './gate.js';
 import { countTokens, geminiDialect, geminiModels, parseModelPath } from './gemini.js';
+import { ollamaDialect, ollamaShow, ollamaTags, ollamaVersion } from './ollama.js';
 import { openAiDialect, sendJson } from './openai.js';
 import { listModelIds, type Route } from './router.js';
 
@@ -111,6 +112,16 @@ const DIALECT_ROUTES: DialectRoute[] = [
     match: (path) => (path === '/v1/messages' ? {} : undefined),
   },
   {
+    name: 'ollama',
+    dialect: ollamaDialect as unknown as DialectHooks<never>,
+    match: (path) =>
+      path === '/api/chat'
+        ? { endpoint: 'chat' }
+        : path === '/api/generate'
+          ? { endpoint: 'generate' }
+          : undefined,
+  },
+  {
     name: 'gemini',
     dialect: geminiDialect as unknown as DialectHooks<never>,
     match: (path) => {
@@ -179,6 +190,20 @@ export function createGatewayHandler(options: GatewayOptions): GatewayHandler {
         return sendJson(response, 200, geminiModels(options.providers), cors);
       }
 
+      if (path === '/api/tags' && request.method === 'GET') {
+        return sendJson(response, 200, ollamaTags(options.providers, runtime.now()), cors);
+      }
+
+      if (path === '/api/version' && request.method === 'GET') {
+        return sendJson(response, 200, ollamaVersion(), cors);
+      }
+
+      if (path === '/api/show' && request.method === 'POST') {
+        const body = (await readJsonBody(request)) as { model?: string; name?: string } | undefined;
+        const shown = ollamaShow(options.providers, body?.model ?? body?.name);
+        return sendJson(response, shown.status, shown.body, cors);
+      }
+
       const counting = parseModelPath(path);
       if (counting?.method === 'countTokens' && request.method === 'POST') {
         const counted = countTokens(
@@ -206,7 +231,8 @@ export function createGatewayHandler(options: GatewayOptions): GatewayHandler {
         'not_found',
         `no route for ${request.method} ${path}`,
         'This build serves /v1/chat/completions, /v1/messages, ' +
-          '/v1beta/models/<model>:generateContent, /v1/models and /health.',
+          '/v1beta/models/<model>:generateContent, /api/chat, /api/generate, ' +
+          '/v1/models and /health.',
       );
       return sendJson(response, refused.status, refused.body, cors);
     } catch (error) {
