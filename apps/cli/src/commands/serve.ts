@@ -106,11 +106,19 @@ export async function runServe(
     return EXIT_OK;
   }
 
-  const port = parsePort(parsed.values.port as string | undefined);
+  // --port / --host win over $PORT / $HOST so a container can be reconfigured
+  // without rebuilding. The container's HOST=0.0.0.0 must actually be honoured —
+  // otherwise the port mapping is unreachable (the gateway would bind 127.0.0.1
+  // inside the container).
+  const portRaw =
+    (parsed.values.port as string | undefined) ?? io.env['PORT'] ?? io.env['OMNIPROXY_PORT'];
+  const port = parsePort(portRaw);
   if (port === undefined) {
     io.err(`omniproxy: --port must be a number between 0 and 65535`);
     return EXIT_USAGE;
   }
+  const hostRaw =
+    (parsed.values.host as string | undefined) ?? io.env['HOST'] ?? io.env['OMNIPROXY_HOST'];
 
   // ── the providers ──
   const found = await discoverProviders(discoveryOptionsFrom(io, parsed.values['provider-dir']));
@@ -189,17 +197,24 @@ export async function runServe(
   }
 
   // ── the socket ──
+  let extraEnv: Record<string, string>;
+  try {
+    extraEnv = parseEnvPairs(parsed.values.env as string[] | undefined);
+  } catch (error) {
+    io.err(`omniproxy: ${(error as Error).message}`);
+    return EXIT_USAGE;
+  }
   let gateway: RunningGateway;
   try {
     gateway = await serve({
       providers,
       accounts: pool,
       http: fetchHttpClient(),
-      env: { ...io.env, ...parseEnvPairs(parsed.values.env as string[] | undefined) },
+      env: { ...io.env, ...extraEnv },
       port,
       log: (line) => io.err(line),
       ...(dialects.length > 0 ? { dialects } : {}),
-      ...(parsed.values.host ? { host: parsed.values.host as string } : {}),
+      ...(hostRaw ? { host: hostRaw } : {}),
       ...(apiKey ? { apiKey } : {}),
     });
   } catch (error) {
@@ -321,7 +336,10 @@ function parseEnvPairs(pairs: readonly string[] | undefined): Record<string, str
   const env: Record<string, string> = {};
   for (const pair of pairs ?? []) {
     const index = pair.indexOf('=');
-    if (index > 0) env[pair.slice(0, index)] = pair.slice(index + 1);
+    if (index <= 0) {
+      throw new Error(`--env expects K=V, got "${pair}"`);
+    }
+    env[pair.slice(0, index)] = pair.slice(index + 1);
   }
   return env;
 }

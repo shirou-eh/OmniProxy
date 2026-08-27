@@ -2,6 +2,7 @@ node_modules/
 .env
 *.log
 auth.json
+accounts.json
 deepseek-auth.json
 # Aggregate account export holding live tokens/cookies — never commit.
 deepseek-accounts.json
@@ -23,3 +24,12 @@ coverage/
 
 # Local runtime state: credentials, artifacts, jobs, user provider modules.
 .omniproxy/
+# Raw captures (har import / record) — contain live cookies. Never commit.
+*.raw.json
+*.har
+# Sanitized fixtures belong in providers/*/fixtures/, but raw bundles next to a
+# provider must not be committed by `git add .` inside the repo checkout.
+providers/*/*.raw.json
+providers/*/*.har
+accounts*.json
+!legacy/auth.example.json

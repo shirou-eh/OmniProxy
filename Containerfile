@@ -45,10 +45,16 @@ RUN adduser -D -u 1000 omniproxy \
 COPY --from=build --chown=1000:1000 /app/package.json ./package.json
 COPY --from=build --chown=1000:1000 /app/pnpm-lock.yaml ./pnpm-lock.yaml
 COPY --from=build --chown=1000:1000 /app/pnpm-workspace.yaml ./pnpm-workspace.yaml
+COPY --from=build --chown=1000:1000 /app/tsconfig.base.json ./tsconfig.base.json
+COPY --from=build --chown=1000:1000 /app/turbo.json ./turbo.json
+# Only dist is needed at runtime — src stays in the build layer. Packages are
+# copied without their src to keep the image small and honest (no secrets in src).
 COPY --from=build --chown=1000:1000 /app/packages ./packages
 COPY --from=build --chown=1000:1000 /app/apps ./apps
 COPY --from=build --chown=1000:1000 /app/providers ./providers
+# Prune dev deps: the gateway needs only its prod deps at runtime.
 COPY --from=build --chown=1000:1000 /app/node_modules ./node_modules
+RUN corepack enable && pnpm prune --prod
 
 USER 1000:1000
 

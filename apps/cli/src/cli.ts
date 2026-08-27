@@ -22,16 +22,16 @@ import { EXIT_OK, EXIT_USAGE, type CliIo } from './io.js';
 export const USAGE = `omniproxy — universal relay for provider web APIs
 
 Usage:
-  omniproxy serve [--port <n>] [--host <addr>] [--accounts <file.json>] [--api-key <secret>] [--dialect <path>]
+  omniproxy serve [--port <n>] [--host <addr>] [--accounts <file.json>] [--api-key <secret>] [--dialect <path>] [--provider <id>] [--provider-dir <dir>] [--env K=V]
 
-  omniproxy provider list [--provider-dir <dir>]
-  omniproxy provider validate [<id>]
-  omniproxy provider draft <bundle.json> [--out <path>]
+  omniproxy provider list [--provider-dir <dir>] [--json]
+  omniproxy provider validate [<id>] [--json]
+  omniproxy provider draft <bundle.json> [--out <path>] [--provider <id>]
 
-  omniproxy capture record <provider-id> --auth <file.json>
-  omniproxy capture import <file.har> --provider <id> --scenario <name>
+  omniproxy capture record <provider-id> --auth <file.json> [--prompt <text>] [--model <alias>] [--scenario <name>] [--out <dir>] [--env K=V]
+  omniproxy capture import <file.har> --provider <id> --scenario <name> [--out <dir>]
   omniproxy capture sanitize <bundle.json> [--out <path>]
-  omniproxy capture analyze <bundle.json> [--compare <other.json>]
+  omniproxy capture analyze <bundle.json> [--compare <other.json>] [--json]
 
 Run a command with --help for its options.
 
