@@ -1,6 +1,6 @@
 {
   "name": "omniproxy",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "private": true,
   "description": "Universal relay for provider web APIs — OpenAI/Anthropic/Gemini-compatible gateway over web chat interfaces",
   "license": "MIT",

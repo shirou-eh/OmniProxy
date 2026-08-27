@@ -1,6 +1,6 @@
 {
   "name": "@omniproxy/dialect-openai",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "private": true,
   "description": "OpenAI-compatible surface built from UMR and UMS, and nothing else",
   "license": "MIT",

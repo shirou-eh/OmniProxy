@@ -1,6 +1,6 @@
 {
   "name": "@omniproxy/engine-declarative",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "private": true,
   "description": "Executes provider.yaml declarations: templating, JSONPath, transforms, stream framing",
   "license": "MIT",

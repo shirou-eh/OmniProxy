@@ -10,6 +10,16 @@ import {
   runProviderList,
   runProviderValidate,
 } from './commands/provider.js';
+import {
+  AUTH_ADD_USAGE,
+  AUTH_LIST_USAGE,
+  AUTH_PATH_USAGE,
+  AUTH_REMOVE_USAGE,
+  runAuthAdd,
+  runAuthList,
+  runAuthPath,
+  runAuthRemove,
+} from './commands/auth.js';
 import { EXIT_OK, EXIT_USAGE, type CliIo } from './io.js';
 
 /**
@@ -28,6 +38,11 @@ Usage:
   omniproxy provider validate [<id>] [--json]
   omniproxy provider draft <bundle.json> [--out <path>] [--provider <id>]
 
+  omniproxy auth add <provider> [--id <id>] [--field K=V]...
+  omniproxy auth list [--json]
+  omniproxy auth remove <provider> [--id <id>]
+  omniproxy auth path
+
   omniproxy capture record <provider-id> --auth <file.json> [--prompt <text>] [--model <alias>] [--scenario <name>] [--out <dir>] [--env K=V]
   omniproxy capture import <file.har> --provider <id> --scenario <name> [--out <dir>]
   omniproxy capture sanitize <bundle.json> [--out <path>]
@@ -36,7 +51,7 @@ Usage:
 Run a command with --help for its options.
 
 Gateway: OpenAI / Anthropic / Gemini / Ollama — four dialects, plus your own via --dialect.
-Under construction: browser-based recorder, encrypted credential store, probe/doctor, job/media.
+Under construction: browser-based recorder, probe/doctor, job/media.
 See docs/omniproxy/04-phase-1-plan.md for what lands next.`;
 
 const CAPTURE_USAGE = `omniproxy capture — record and prepare provider traffic
@@ -58,7 +73,19 @@ const PROVIDER_USAGE = `omniproxy provider — provider modules
 A provider module is a directory containing provider.yaml. Yours are found the same
 way ours are, and yours take precedence — see ADR-0003.`;
 
-export const VERSION_LINE = 'omniproxy 0.1.0 (gateway: openai/anthropic/gemini/ollama + pluggable dialects)';
+const AUTH_USAGE = `omniproxy auth — credentials for providers
+
+  add       Store a credential (0600 file at ~/.omniproxy/accounts.json).
+  list      Show which providers have accounts (names of fields only).
+  remove    Remove a credential.
+  path      Print the file that holds the credentials.
+
+The store is a JSON file: { "deepseek-web": { "token": "…" } } or a pool
+{ "qwen-web": [{ "id": "work", "fields": { "token": "…" } }] }.
+It is created 0600 (owner-only) and never logged. Delete it with
+\`rm ~/.omniproxy/accounts.json\` (or OMNIPROXY_HOME/accounts.json).`;
+
+export const VERSION_LINE = 'omniproxy 0.1.2 (gateway: openai/anthropic/gemini/ollama + pluggable dialects + auth store)';
 
 export async function run(argv: readonly string[], io: CliIo): Promise<number> {
   const [group, command, ...rest] = argv;
@@ -128,6 +155,33 @@ export async function run(argv: readonly string[], io: CliIo): Promise<number> {
     }
     io.err(`omniproxy: unknown provider command "${command}"`);
     io.err(PROVIDER_USAGE);
+    return EXIT_USAGE;
+  }
+
+  if (group === 'auth') {
+    if (command === 'add') return runAuthAdd(rest, io);
+    if (command === 'list') return runAuthList(rest, io);
+    if (command === 'remove' || command === 'rm') return runAuthRemove(rest, io);
+    if (command === 'path') return runAuthPath(rest, io);
+    if (command === undefined) {
+      io.err('omniproxy: auth needs a subcommand');
+      io.err(AUTH_USAGE);
+      return EXIT_USAGE;
+    }
+    if (command === '--help' || command === '-h') {
+      io.out(AUTH_USAGE);
+      io.out('');
+      io.out(AUTH_ADD_USAGE);
+      io.out('');
+      io.out(AUTH_LIST_USAGE);
+      io.out('');
+      io.out(AUTH_REMOVE_USAGE);
+      io.out('');
+      io.out(AUTH_PATH_USAGE);
+      return EXIT_OK;
+    }
+    io.err(`omniproxy: unknown auth command "${command}"`);
+    io.err(AUTH_USAGE);
     return EXIT_USAGE;
   }
 

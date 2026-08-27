@@ -30,13 +30,41 @@ First tagged release. The gateway runs; every declaration is still `unverified` 
 
 ### Known limitations (§12.5 — not TODO-later, but explicit)
 
-- Credential store is a plaintext JSON (`--accounts` / `~/.omniproxy/accounts.json`); encrypted store (DPAPI/libsecret/600 file) is the next PR.
 - Browser/CDP recorder for live traffic not yet — declarations stay `unverified`.
-- `provider diff|migrate`, `auth add|list|refresh`, `probe`, `doctor`, `job/media`, `/v1/capabilities`, `/metrics`, `tls-client` sidecar — planned, not advertised (CLI `--help` is exact).
+- `provider diff|migrate`, `probe`, `doctor`, `job/media`, `/v1/capabilities`, `/metrics`, `tls-client` sidecar — planned, not advertised (CLI `--help` is exact).
 - Windows + Linux CI (ADR-0005), deterministic file order, one window still lives on `OneDrive/Desktop` (R-10).
 
 ### Tests
 
 - 868 tests total: 827 vitest (`schema` 8, `provider-sim` 15, `capture` 121, `engine-declarative` 166, `umr` 31, `dialect-openai` 60, `dialect-anthropic` 54, `dialect-gemini` 53, `dialect-ollama` 41, `transport` 23, `gateway` 187, `cli` 68) + 41 `legacy` (`node:test`), all green on Windows+Linux, Node 22/24.
 
+## [0.1.1] — 2026-08-27
+
+Blockers for a truly runnable gateway (found by `git add .` and `docker run` outside the repo):
+
+- Container `HOST`/`PORT` were dead env — gateway always bound `127.0.0.1` inside the container. `serve` now reads `$HOST`/`$PORT` (`$OMNIPROXY_HOST/_PORT` alias) as fallback for `--host/--port`.
+- Provider discovery found nothing outside the repo (`cwd=/tmp`, global install). `findRepoRoot` now falls back to the CLI's own location (`../../../../providers`).
+- `--env FOO` without `=` was silently dropped — now `EXIT_USAGE`.
+- `.gitignore` leaked `accounts.json` and `*.raw.json`; now ignores them.
+- `pnpm/action-setup` now pinned to `11.24.0`.
+
+## [0.1.2] — 2026-08-27
+
+**Credential store.**
+
+- `omniproxy auth add <provider> [--id <id>] --field K=V...` — writes
+  `~/.omniproxy/accounts.json` (or `$OMNIPROXY_HOME/accounts.json`) with
+  `mkdir 0700` + `write 0600` + `chmod 0600` on POSIX; never logs values
+  (§12.7). Single account as plain object, second as pool, duplicate id
+  refused. `auth list [--json]` shows names of fields only, `auth remove`
+  and `auth path` (where the file lives, `rm` to delete). `serve` and
+  `auth` both respect `$OMNIPROXY_HOME`, `$HOME`, `$USERPROFILE`.
+- `serve` warns if the file/dir is group/other-readable; `auth add` warns
+  if the dir is.
+- Tests: 17 new `auth.test.ts`, total 885 (844 vitest + 41 legacy). Help
+  updated: `auth add` is now advertised, `Under construction` no longer
+  lists the credential store.
+
 [0.1.0]: https://github.com/shirou-eh/OmniProxy/releases/tag/v0.1.0
+[0.1.1]: https://github.com/shirou-eh/OmniProxy/releases/tag/v0.1.1
+[0.1.2]: https://github.com/shirou-eh/OmniProxy/releases/tag/v0.1.2

@@ -1,6 +1,6 @@
 {
   "name": "@omniproxy/dialect-gemini",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "private": true,
   "description": "The Gemini generateContent-compatible surface, built from UMR and UMS",
   "license": "MIT",

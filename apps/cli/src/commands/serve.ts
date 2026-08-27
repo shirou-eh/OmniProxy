@@ -282,7 +282,9 @@ function report(
 async function loadAccounts(io: CliIo, file: string | undefined): Promise<Account[]> {
   const path = file
     ? resolve(io.cwd, file)
-    : join(io.env['OMNIPROXY_HOME'] ?? join(homedir(), '.omniproxy'), 'accounts.json');
+    : io.env['OMNIPROXY_HOME']
+      ? join(resolve(io.env['OMNIPROXY_HOME']), 'accounts.json')
+      : join(io.env['HOME'] ?? io.env['USERPROFILE'] ?? homedir(), '.omniproxy', 'accounts.json');
 
   let raw: string;
   try {

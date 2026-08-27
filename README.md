@@ -108,7 +108,11 @@ client, the whole flow runs end to end against a protocol-faithful local simulat
 **nothing has been confirmed against the live service**. See
 [`docs/providers/deepseek-web.md`](docs/providers/deepseek-web.md).
 
-**868 tests**, on Windows and Linux, including golden parity tests that run the same
+Credentials live in `~/.omniproxy/accounts.json` (0600, owner-only) — manage them
+with `omniproxy auth add/list/remove` (`--help` tells where the file is and how to
+delete it). `serve` still accepts `--accounts <file>` for a one-off file.
+
+**885 tests**, on Windows and Linux, including golden parity tests that run the same
 DeepSeek stream frames — and the same conversations and tool-call markup — through the
 real legacy parser and the new engine, and compare them byte for byte.
 
@@ -275,7 +279,10 @@ omniproxy provider draft <bundle>          # черновик provider.yaml, в�
 **против живого сервиса не подтверждено ничего**. Подробности —
 [`docs/providers/deepseek-web.md`](docs/providers/deepseek-web.md).
 
-**868 тестов**, на Windows и Linux, включая golden-тесты, которые гоняют одни и те же
+Учётные данные — в `~/.omniproxy/accounts.json` (0600, только владелец) — правьте
+через `omniproxy auth add/list/remove` (`--help` скажет, где файл и как удалить).
+
+**885 тестов**, на Windows и Linux, включая golden-тесты, которые гоняют одни и те же
 кадры потока DeepSeek — и те же диалоги и ту же разметку tool-call — через настоящий
 парсер legacy и через новый движок и сравнивают результат побайтно.
 
