@@ -723,7 +723,7 @@ Ollama взят не ради счётчика протоколов. На нём
 - `/api/show` печатает `omniproxy.status` ровно так, как написано в декларации, и **не**
   сообщает длину контекста: против живого сервиса её никто не мерил, а число здесь
   клиент начал бы планировать.
-- `/api/version` отвечает `0.0.0-omniproxy`, а не версией Ollama, которой мы не
+- `/api/version` отвечает `0.1.0-omniproxy`, а не версией Ollama, которой мы не
   являемся.
 
 **Мелочи, каждая со своим тестом:** аргументы tool-call у Ollama — объект, а не строка,
@@ -781,3 +781,41 @@ Windows и на Linux (ADR-0005). Экспорт может называться
 образцов. Тест, который держит эту дверь открытой, — `packages/gateway/test/plugin.test.ts`:
 диалект, изобретённый прямо в тесте, получает тот же промпт у провайдера, тот же пул
 аккаунтов и тот же переход на другой аккаунт, что и встроенные четыре.
+
+### PR-14 — выполнен (2026-08-27): релиз-гигиена, чтобы тег `v0.1.0` не врал
+
+**868 тестов**, всё зелёно, `build / typecheck / test / legacy:test` — без росписи не релиз.
+
+Что мешало назвать `v0.1.0` и не стало:
+
+1. **CLI врал.** `apps/cli/src/cli.ts:38` всё ещё рекламировал «Anthropic и Gemini — скоро»,
+   когда все четыре диалекта уже полгода как в коде. Теперь `--help` точен: четыре диалекта
+   плюс ваш через `--dialect`, а «скоро» — это рекордер, шифрованное хранилище, `probe/doctor`,
+   `job/media`. `VERSION_LINE` `0.0.0 (phase 2: the gateway)` → `0.1.0 (gateway: openai/anthropic/gemini/ollama + pluggable dialects)`.
+
+2. **Доки обещали несуществующее.** `01-monorepo.md` — дерево «целевого» монорепо из ТЗ (Fastify,
+   `packages/core/*`, `apps/worker`) лежало без пометки, что это визион. Теперь шапка честно
+   говорит, что есть сегодня (`[+]`), `02-provider-yaml.md` помечает `provider diff|migrate`,
+   `module.json` как «планируется», `providers/deepseek-web.md:30` чинит пример
+   `omniproxy capture record --provider` → `omniproxy capture record deepseek-web --auth …`.
+
+3. **Версия 0.0.0 везде.** `package.json` и 11 `packages/*/package.json` → `0.1.0`, добавлен
+   `repository` / `homepage` / `bugs` (был только в `legacy/package.json`), `engines: node>=22`
+   в каждый пакет, `ollamaVersion()` `0.0.0-omniproxy` → `0.1.0-omniproxy`.
+
+4. **Безопасность на половину.** `hif_*`/`smidV2`/`HWWAF`/`userToken` в `secrets-scan` CI не
+   ловились — добавлены, плюс отдельный `audit` джоб (`pnpm audit --audit-level high`);
+   `--accounts` теперь предупреждает, если файл читаем группой/другими (`chmod 600`),
+   с подсказкой про будущее шифрованное хранилище (§8.4 — требование, не пожелание).
+
+5. **Образ для запуска.** `Containerfile` в корне — multi-stage `node:22-alpine`, непривилегированный
+   `1000:1000`, `HEALTHCHECK` на `/health`, `VOLUME /home/omniproxy/.omniproxy`; `legacy/Containerfile`
+   остаётся для исходного прокси (порт 9655).
+
+6. **CHANGELOG.** `CHANGELOG.md` заведён по Keep a Changelog, с честным «known limitations» —
+   открытый JSON аккаунтов, живой рекордер и `doctor/probe` ещё впереди (§12.5).
+
+Что не вошло и почему не соврано: шифрованное хранилище (DPAPI/libsecret), живой CDP-рекордер,
+`packages/testkit` канарейки, `/v1/capabilities`, `local-process`/`app-backend` каналы для не-веб
+прокси — всё осталось в «Что дальше» и не рекламируется `omniproxy --help`. Релиз `0.1.0` — это
+«шлюз работает, его можно поднять одним `serve`, его слова сходятся с делом», а не «всё готово».

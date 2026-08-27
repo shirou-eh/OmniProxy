@@ -55,6 +55,10 @@ jobs:
             '"cookie"[[:space:]]*:[[:space:]]*"[^"]{40,}"'
             'Authorization:[[:space:]]*Bearer[[:space:]]+[A-Za-z0-9._-]{20,}'
             'ds_session_id=[A-Za-z0-9]{16,}'
+            'smidV2=[A-Za-z0-9._-]{16,}'
+            'hif_(dliq|leim)=[A-Za-z0-9._-]{16,}'
+            'HWWAFSESS?ID=[A-Za-z0-9]{16,}'
+            'userToken[[:space:]]*[:=][[:space:]]*[^[:space:]]{20,}'
           )
           status=0
           for p in "${patterns[@]}"; do
@@ -64,3 +68,16 @@ jobs:
             fi
           done
           exit $status
+
+  audit:
+    name: audit (no high vulns)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm audit --audit-level high

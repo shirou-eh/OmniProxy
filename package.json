@@ -1,6 +1,6 @@
 {
   "name": "omniproxy",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "description": "Universal relay for provider web APIs — OpenAI/Anthropic/Gemini-compatible gateway over web chat interfaces",
   "license": "MIT",
@@ -23,5 +23,24 @@
     "turbo": "^2.5.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shirou-eh/OmniProxy.git"
+  },
+  "homepage": "https://github.com/shirou-eh/OmniProxy#readme",
+  "bugs": {
+    "url": "https://github.com/shirou-eh/OmniProxy/issues"
+  },
+  "keywords": [
+    "omniproxy",
+    "proxy",
+    "openai",
+    "anthropic",
+    "gemini",
+    "ollama",
+    "gateway",
+    "provider",
+    "web-api"
+  ]
 }

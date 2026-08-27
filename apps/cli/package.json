@@ -1,6 +1,6 @@
 {
   "name": "@omniproxy/cli",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "description": "omniproxy command line",
   "license": "MIT",
@@ -28,5 +28,17 @@
     "@types/node": "^22.10.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shirou-eh/OmniProxy.git",
+    "directory": "apps/cli"
+  },
+  "homepage": "https://github.com/shirou-eh/OmniProxy#readme",
+  "bugs": {
+    "url": "https://github.com/shirou-eh/OmniProxy/issues"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

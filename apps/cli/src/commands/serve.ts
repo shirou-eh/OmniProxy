@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -272,6 +272,19 @@ async function loadAccounts(io: CliIo, file: string | undefined): Promise<Accoun
   let raw: string;
   try {
     raw = await readFile(path, 'utf8');
+    // Plaintext store today, encrypted credential-store tomorrow. At minimum the
+    // file must not be world-readable — warn once and continue (X-6).
+    if (process.platform !== 'win32') {
+      try {
+        const info = await stat(path);
+        if ((info.mode & 0o044) !== 0) {
+          io.err(`warning: ${path} is readable by group/others (mode ${ (info.mode & 0o777).toString(8) }); run: chmod 600 ${path}`);
+          io.err('note: a future release will move credentials to an encrypted store (DPAPI/libsecret or 600 file)');
+        }
+      } catch {
+        // stat failure is not a load failure.
+      }
+    }
   } catch (error) {
     if (file) {
       throw new AccountFileError(

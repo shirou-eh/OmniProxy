@@ -1,6 +1,30 @@
 # OmniProxy — дерево монорепо и назначение пакетов
 
+> **Визион (§2.2) против реальности PR-13.** Ниже — целевое дерево из исходного ТЗ
+> (7 фаз, ~25 провайдеров, `apps/gateway` на Fastify, `packages/core/*`, `packages/auth` …).
+> То, что **уже реализовано сегодня**, выделено `[+]` и перечислено в § «Что есть сейчас».
+> Остальное — план, а не факт. Смотри также `04-phase-1-plan.md` — журнал, где каждый PR
+> фиксирует, что стало реальностью и что осталось на бумаге.
+
 Отличия от §2.2 промта отмечены `[+]` (добавлено) и обоснованы.
+
+## Что есть сейчас (PR-13)
+
+```
+apps/cli/            — единственный app, бинарь omniproxy (serve / provider / capture)
+packages/schema/     — UMS, CaptureBundle, ProviderDeclaration, OmniError
+packages/umr/        — универсальный диалог → промпт (flattenConversation)
+packages/engine-declarative/ — исполнение provider.yaml (flow, JSONPath, трансформы, фрейминг)
+packages/capture/    — HAR → санитизация → анализ → draft
+packages/transport/  — fetchHttpClient / recording / replay
+packages/provider-sim/ — локальный симулятор DeepSeek (ADR-0007)
+packages/dialect-{openai,anthropic,gemini,ollama}/ — чистые трансляторы
+packages/gateway/    — HTTP-поверхность, роутинг, пул аккаунтов, ворота, цикл запроса
+providers/deepseek-web/ — единственная реальная декларация (status: unverified)
+legacy/              — исходный прокси, untouched, golden-тесты
+```
+
+Всё остальное ниже — визион, не реализовано. Честная граница.
 
 ```
 omniproxy/

@@ -1,14 +1,21 @@
 {
   "name": "@omniproxy/provider-sim",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "description": "Protocol-faithful local simulators of provider web APIs, for recording and CI",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
-  "files": ["dist"],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -18,5 +25,17 @@
     "@types/node": "^22.10.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shirou-eh/OmniProxy.git",
+    "directory": "packages/provider-sim"
+  },
+  "homepage": "https://github.com/shirou-eh/OmniProxy#readme",
+  "bugs": {
+    "url": "https://github.com/shirou-eh/OmniProxy/issues"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

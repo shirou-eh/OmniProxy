@@ -27,7 +27,7 @@
 
 Пять проверок, все с живым аккаунтом:
 
-1. `omniproxy capture record --provider deepseek-web --scenario chat-stream` — запись
+1. `omniproxy capture record deepseek-web --auth ./auth.json --scenario chat-stream` — запись
    реального обмена.
 2. `omniproxy capture analyze` на записи: цепочка `session → send` должна
    восстановиться, идентификатор сессии — прослеживаться из ответа в тело следующего

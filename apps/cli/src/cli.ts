@@ -22,7 +22,7 @@ import { EXIT_OK, EXIT_USAGE, type CliIo } from './io.js';
 export const USAGE = `omniproxy — universal relay for provider web APIs
 
 Usage:
-  omniproxy serve [--port <n>] [--accounts <file.json>]
+  omniproxy serve [--port <n>] [--host <addr>] [--accounts <file.json>] [--api-key <secret>] [--dialect <path>]
 
   omniproxy provider list [--provider-dir <dir>]
   omniproxy provider validate [<id>]
@@ -35,7 +35,8 @@ Usage:
 
 Run a command with --help for its options.
 
-Under construction: the Anthropic and Gemini dialects, and the browser-based recorder.
+Gateway: OpenAI / Anthropic / Gemini / Ollama — four dialects, plus your own via --dialect.
+Under construction: browser-based recorder, encrypted credential store, probe/doctor, job/media.
 See docs/omniproxy/04-phase-1-plan.md for what lands next.`;
 
 const CAPTURE_USAGE = `omniproxy capture — record and prepare provider traffic
@@ -57,7 +58,7 @@ const PROVIDER_USAGE = `omniproxy provider — provider modules
 A provider module is a directory containing provider.yaml. Yours are found the same
 way ours are, and yours take precedence — see ADR-0003.`;
 
-export const VERSION_LINE = 'omniproxy 0.0.0 (phase 2: the gateway)';
+export const VERSION_LINE = 'omniproxy 0.1.0 (gateway: openai/anthropic/gemini/ollama + pluggable dialects)';
 
 export async function run(argv: readonly string[], io: CliIo): Promise<number> {
   const [group, command, ...rest] = argv;
