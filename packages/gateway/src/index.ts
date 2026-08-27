@@ -16,5 +16,8 @@ export type { ServeOptions, RunningGateway } from './serve.js';
 export { resolveRoute, listModelIds, RoutingError } from './router.js';
 export type { Route } from './router.js';
 
+export { ConcurrencyGate, GateRefused, gateKey } from './gate.js';
+export type { GateOptions, Release } from './gate.js';
+
 export { AccountPool, parseAccountsFile, AccountFileError } from './accounts.js';
 export type { Account, AccountLease, AccountSnapshot, PoolOptions } from './accounts.js';

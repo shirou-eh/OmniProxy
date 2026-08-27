@@ -14,6 +14,7 @@ import {
   defaultTransformContext,
   executeFlow,
   memoryStateStore,
+  pickChannel,
   TransformRegistry,
   type HttpClient,
   type TransformContext,
@@ -25,6 +26,7 @@ import {
   type UMSEvent,
 } from '@omniproxy/schema';
 import { AccountPool, type Account } from './accounts.js';
+import { ConcurrencyGate, gateKey, GateRefused, type Release } from './gate.js';
 import { listModelIds, resolveRoute, RoutingError, type Route } from './router.js';
 
 /**
@@ -54,6 +56,8 @@ export interface GatewayOptions {
   providers: readonly ProviderDeclaration[];
   accounts: AccountPool;
   http: HttpClient;
+  /** Enforces `channels[].concurrency` per account. One is made if none is given. */
+  gate?: ConcurrencyGate;
   transforms?: TransformRegistry;
   transformContext?: TransformContext;
   /**
@@ -78,6 +82,7 @@ interface Runtime {
   uuid(): string;
   transforms: TransformRegistry;
   transformContext: TransformContext;
+  gate: ConcurrencyGate;
   log(line: string): void;
 }
 
@@ -87,6 +92,7 @@ export function createGatewayHandler(options: GatewayOptions): GatewayHandler {
     uuid: options.uuid ?? (() => randomUUID()),
     transforms: options.transforms ?? new TransformRegistry(),
     transformContext: options.transformContext ?? defaultTransformContext(),
+    gate: options.gate ?? new ConcurrencyGate(),
     log: options.log ?? (() => {}),
   };
 
@@ -165,6 +171,8 @@ function health(options: GatewayOptions, runtime: Runtime): unknown {
     })),
     // Field names only. Never a value (§12.7).
     accounts: options.accounts.snapshot(),
+    // What is in flight and what is waiting for a slot. Empty when the gateway is idle.
+    inFlight: runtime.gate.snapshot(),
   };
 }
 
@@ -280,40 +288,47 @@ async function chatCompletions(
     else options.accounts.succeed(account.id);
   };
 
-  if (parsed.stream === true) {
-    return streamResponse(response, opened.stream, identity, {
-      ...shape,
-      provider: route.provider.id,
-      log: runtime.log,
-      settle,
-    });
-  }
-
+  // The concurrency slot is held until the response is finished, streaming included.
+  // Giving it back at any earlier point would let a second request start while the
+  // first is still talking, which is precisely the limit the declaration states.
   try {
-    const collected = await collectUms(opened.stream);
-    settle(collected.error);
-    if (collected.error) {
-      const shaped = toOpenAiError(collected.error);
-      return json(
-        response,
-        shaped.status,
-        { error: shaped.error },
-        retryAfterHeader(collected.error),
-      );
+    if (parsed.stream === true) {
+      return await streamResponse(response, opened.stream, identity, {
+        ...shape,
+        provider: route.provider.id,
+        log: runtime.log,
+        settle,
+      });
     }
-    return json(response, 200, buildChatCompletion(identity, collected, shape, fullPrompt.length));
-  } catch (error) {
-    const omni = asOmniError(error, route.provider.id);
-    settle(omni);
-    const shaped = toOpenAiError(omni);
-    return json(response, shaped.status, { error: shaped.error }, retryAfterHeader(omni));
+
+    try {
+      const collected = await collectUms(opened.stream);
+      settle(collected.error);
+      if (collected.error) {
+        const shaped = toOpenAiError(collected.error);
+        return json(
+          response,
+          shaped.status,
+          { error: shaped.error },
+          retryAfterHeader(collected.error),
+        );
+      }
+      return json(response, 200, buildChatCompletion(identity, collected, shape, fullPrompt.length));
+    } catch (error) {
+      const omni = asOmniError(error, route.provider.id);
+      settle(omni);
+      const shaped = toOpenAiError(omni);
+      return json(response, shaped.status, { error: shaped.error }, retryAfterHeader(omni));
+    }
+  } finally {
+    opened.release?.();
   }
 }
 
 /* ────────────────────────────── attempts and accounts ────────────────────────────── */
 
 type Opened =
-  | { kind: 'ok'; stream: AsyncGenerator<UMSEvent>; account?: Account }
+  | { kind: 'ok'; stream: AsyncGenerator<UMSEvent>; account?: Account; release?: Release }
   | { kind: 'failed'; error: OmniError };
 
 /**
@@ -335,13 +350,16 @@ async function openWithRetry(
   const needsAccount = route.provider.auth.kind !== 'none';
   const attempts = needsAccount ? Math.max(1, options.accounts.size(route.provider.id)) : 1;
   const tried = new Set<string>();
+  const channel = pickChannel(route.provider);
+  const isBusy = (accountId: string): boolean =>
+    runtime.gate.isBusy(gateKey(route.provider.id, channel.id, accountId), channel.concurrency);
   let lastError: OmniError | undefined;
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     let account: Account | undefined;
 
     if (needsAccount) {
-      const lease = options.accounts.nextFor(route.provider.id, tried);
+      const lease = options.accounts.nextFor(route.provider.id, tried, isBusy);
 
       if (lease.kind === 'none') {
         return { kind: 'failed', error: noAccountError(route.provider.id, lease.reason, lastError) };
@@ -364,6 +382,19 @@ async function openWithRetry(
       tried.add(account.id);
     }
 
+    // The provider's own limit on simultaneous requests, honoured per account. Taken
+    // before anything is sent and given back in `finally`, wherever the response ends.
+    let release: Release;
+    try {
+      release = await runtime.gate.acquire(
+        gateKey(route.provider.id, channel.id, account?.id),
+        channel.concurrency,
+      );
+    } catch (error) {
+      if (error instanceof GateRefused) return { kind: 'failed', error: gateError(error, route) };
+      throw error;
+    }
+
     // A fresh state store per attempt: a session created by a failed attempt belongs to
     // that attempt's account, and must not leak into the next one's.
     const events = executeFlow({
@@ -384,8 +415,13 @@ async function openWithRetry(
     });
 
     const opened = await commit(events, route.provider.id);
-    if (opened.kind === 'ok') return account ? { ...opened, account } : opened;
+    if (opened.kind === 'ok') {
+      return account ? { ...opened, account, release } : { ...opened, release };
+    }
 
+    // The attempt is over; the next one takes its own slot, and may well take it on a
+    // different account.
+    release();
     lastError = opened.error;
     if (account) options.accounts.fail(account.id, opened.error);
 
@@ -406,6 +442,23 @@ async function openWithRetry(
       retryable: 'no',
       provider: route.provider.id,
     },
+  };
+}
+
+/**
+ * A refusal from the gate, in the shape a client can act on.
+ *
+ * `rate_limit` rather than `internal`, because that is what it is: the limit is the
+ * provider's, we are simply the ones holding the line in front of it.
+ */
+function gateError(refused: GateRefused, route: Route): OmniError {
+  return {
+    code: 'rate_limit',
+    message: refused.message,
+    userAction: refused.userAction,
+    retryable: 'same-account',
+    ...(refused.reason === 'timed-out' ? { retryAfterMs: 5_000 } : {}),
+    provider: route.provider.id,
   };
 }
 
@@ -441,6 +494,7 @@ function noAccountError(
  * sees exactly the event sequence it would have seen had nothing peeked at it.
  */
 async function commit(events: AsyncGenerator<UMSEvent>, provider: string): Promise<Opened> {
+  // Same shape as `Opened`, minus the account and the slot the caller attaches.
   const head: UMSEvent[] = [];
   try {
     for (;;) {

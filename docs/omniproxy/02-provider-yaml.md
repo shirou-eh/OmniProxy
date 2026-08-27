@@ -73,7 +73,7 @@ channels:
         referer: https://chat.qwen.ai/
     http2: true
     proxy: inherit                # inherit | required | none
-    concurrency: 1                # одновременных запросов на аккаунт
+    concurrency: 1                # одновременных запросов на аккаунт (шлюз это применяет)
     rateLimit: { perMinute: 20 }
   - id: browser
     kind: web-browser

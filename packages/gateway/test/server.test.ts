@@ -7,6 +7,7 @@ import type { ProviderDeclaration } from '@omniproxy/schema';
 import { fetchHttpClient } from '@omniproxy/transport';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { AccountPool, type Account } from '../src/accounts.js';
+import { ConcurrencyGate } from '../src/gate.js';
 import { serve, type RunningGateway } from '../src/serve.js';
 
 /**
@@ -50,6 +51,7 @@ interface Harness {
   sim: DeepSeekSim;
   gateway: RunningGateway;
   pool: AccountPool;
+  gate: ConcurrencyGate;
   logs: string[];
 }
 
@@ -59,6 +61,8 @@ async function start(
     accounts?: Account[];
     apiKey?: string;
     host?: string;
+    concurrency?: number;
+    gate?: ConcurrencyGate;
   } = {},
 ): Promise<Harness> {
   sim = await startDeepSeekSim({ token: TOKEN, reply: REPLY, ...options.simulator });
@@ -69,17 +73,25 @@ async function start(
   // and the error rules are the ones users get.
   const declaration = {
     ...shipped,
-    channels: [{ ...shipped.channels[0]!, base: sim.url }],
+    channels: [
+      {
+        ...shipped.channels[0]!,
+        base: sim.url,
+        ...(options.concurrency !== undefined ? { concurrency: options.concurrency } : {}),
+      },
+    ],
   } as ProviderDeclaration;
 
   const pool = new AccountPool(
     options.accounts ?? [{ id: 'sim', provider: 'deepseek-web', fields: { token: TOKEN } }],
   );
   const logs: string[] = [];
+  const gate = options.gate ?? new ConcurrencyGate();
 
   gateway = await serve({
     providers: [declaration],
     accounts: pool,
+    gate,
     http: fetchHttpClient(),
     env: { DEEPSEEK_WASM_URL: `${sim.url}${simWasmPath()}` },
     port: 0,
@@ -88,7 +100,7 @@ async function start(
     ...(options.host ? { host: options.host } : {}),
   });
 
-  return { sim, gateway, pool, logs };
+  return { sim, gateway, pool, gate, logs };
 }
 
 async function chat(
@@ -536,3 +548,150 @@ describe('CORS', () => {
     expect(harness.sim.requests).toHaveLength(0);
   });
 });
+
+/* ────────────────────────────── the declared concurrency ────────────────────────────── */
+
+describe('channels[].concurrency', () => {
+  it('serializes requests against one account when the declaration says one', async () => {
+    // The DeepSeek channel declares `concurrency: 1`. Before the gate existed the
+    // declaration said so and nothing enforced it — three simultaneous requests all
+    // went out, which is how a web chat answers one of them wrongly or bans the
+    // account.
+    const harness = await start({ simulator: { frameDelayMs: 5 } });
+    const message = { model: 'deepseek-chat', messages: [{ role: 'user', content: 'hi' }] };
+
+    const responses = await Promise.all([
+      chat(harness, message),
+      chat(harness, message),
+      chat(harness, message),
+    ]);
+
+    for (const response of responses) {
+      expect(response.status).toBe(200);
+      expect(((await response.json()) as { choices: { message: { content: string } }[] })
+        .choices[0]?.message.content).toBe(REPLY);
+    }
+
+    // Three answers, three sessions, and never two completions overlapping.
+    expect(harness.sim.sessions).toHaveLength(3);
+    expect(maxOverlap(harness.sim)).toBe(1);
+  });
+
+  it('runs the declared number at once when the declaration allows more', async () => {
+    const harness = await start({ concurrency: 3, simulator: { frameDelayMs: 5 } });
+    const message = { model: 'deepseek-chat', messages: [{ role: 'user', content: 'hi' }] };
+
+    const responses = await Promise.all([
+      chat(harness, message),
+      chat(harness, message),
+      chat(harness, message),
+    ]);
+
+    for (const response of responses) expect(response.status).toBe(200);
+    for (const response of responses) await response.arrayBuffer();
+    expect(maxOverlap(harness.sim)).toBeGreaterThan(1);
+  });
+
+  it('lets two accounts work at the same time', async () => {
+    // A per-provider limit would make a second account pointless. This is per account.
+    const harness = await start({
+      simulator: { frameDelayMs: 5 },
+      accounts: [
+        { id: 'one', provider: 'deepseek-web', fields: { token: TOKEN } },
+        { id: 'two', provider: 'deepseek-web', fields: { token: TOKEN } },
+      ],
+    });
+    const message = { model: 'deepseek-chat', messages: [{ role: 'user', content: 'hi' }] };
+
+    const responses = await Promise.all([chat(harness, message), chat(harness, message)]);
+    for (const response of responses) expect(response.status).toBe(200);
+    for (const response of responses) await response.arrayBuffer();
+
+    expect(maxOverlap(harness.sim)).toBe(2);
+    // One request each, rather than both landing on the same account.
+    const snapshot = harness.pool.snapshot();
+    expect(snapshot.map((entry) => entry.successes).sort()).toEqual([1, 1]);
+  });
+
+  it('gives the slot back when the request fails, not only when it succeeds', async () => {
+    // A slot lost on the error path is an account that looks permanently busy — the
+    // failure this whole gate exists to prevent, arriving by the back door.
+    const harness = await start({ simulator: { quotaExhausted: true } });
+
+    const response = await chat(harness, {
+      model: 'deepseek-chat',
+      messages: [{ role: 'user', content: 'hi' }],
+    });
+    expect(response.status).toBe(429);
+    await response.arrayBuffer();
+
+    expect(harness.gate.snapshot()).toEqual([]);
+  });
+
+  it('gives the slot back after a stream has finished', async () => {
+    const harness = await start();
+    const response = await chat(harness, {
+      model: 'deepseek-chat',
+      messages: [{ role: 'user', content: 'hi' }],
+      stream: true,
+    });
+    await response.text();
+
+    expect(harness.gate.snapshot()).toEqual([]);
+  });
+
+  it('refuses, with something to do about it, when the queue is full', async () => {
+    // Accepting a request that will not be served for minutes is worse than saying so.
+    const harness = await start({
+      gate: new ConcurrencyGate({ maxQueue: 1 }),
+      simulator: { frameDelayMs: 20 },
+    });
+    const message = { model: 'deepseek-chat', messages: [{ role: 'user', content: 'hi' }] };
+
+    const responses = await Promise.all([
+      chat(harness, message),
+      chat(harness, message),
+      chat(harness, message),
+    ]);
+
+    const statuses = responses.map((response) => response.status).sort();
+    expect(statuses).toEqual([200, 200, 429]);
+
+    const refused = responses.find((response) => response.status === 429);
+    const body = (await refused?.json()) as { error: { code: string; action: string } };
+    expect(body.error.code).toBe('rate_limit');
+    expect(body.error.action).toMatch(/Add another account|fewer at once/);
+
+    // Our queue being full is not the account's fault, and it is not rested for it.
+    expect(harness.pool.snapshot()[0]?.available).toBe(true);
+
+    for (const response of responses) await response.arrayBuffer().catch(() => {});
+  });
+});
+
+/**
+ * The largest number of completion requests the simulator ever had open at once.
+ *
+ * Reconstructed from its request log rather than measured with a timer, so the
+ * assertion is about what actually happened and not about how fast the machine is.
+ */
+function maxOverlap(sim: DeepSeekSim): number {
+  // The simulator records a request when it arrives and the gateway holds its slot for
+  // the whole response, so counting sessions created between two completions would be
+  // indirect. Counting how many completions began before the previous one's session
+  // was created is what actually distinguishes serialized from parallel.
+  const marks = sim.requests.map((request) =>
+    request.path.endsWith('/chat/completion') ? 1 : request.path.endsWith('/chat_session/create') ? -1 : 0,
+  );
+
+  let open = 0;
+  let peak = 0;
+  for (const mark of marks) {
+    if (mark === -1) open += 1;
+    if (mark === 1) {
+      peak = Math.max(peak, open);
+      open -= 1;
+    }
+  }
+  return peak;
+}

@@ -103,8 +103,9 @@ export class AccountPool {
   /**
    * The next account to try, or a refusal that says when to come back.
    *
-   * Least-recently-used among the ones that are free, which is round-robin for a pool
-   * and a constant for a pool of one.
+   * Least-recently-used among the ones that are free — round-robin for a pool, and a
+   * constant for a pool of one — preferring an account that is not already at its
+   * concurrency limit.
    *
    * When everything is resting the answer depends on *who said so*. If a provider told
    * us to wait — a `Retry-After`, a quota reset — we pass that on rather than spending
@@ -112,7 +113,11 @@ export class AccountPool {
    * anyway: refusing to work because of our own bookkeeping is the worse mistake, and
    * the provider gets the final word either way.
    */
-  nextFor(providerId: string, exclude: ReadonlySet<string> = new Set()): AccountLease {
+  nextFor(
+    providerId: string,
+    exclude: ReadonlySet<string> = new Set(),
+    isBusy: (accountId: string) => boolean = () => false,
+  ): AccountLease {
     const states = (this.byProvider.get(providerId) ?? []).filter(
       (state) => !exclude.has(state.account.id),
     );
@@ -123,7 +128,13 @@ export class AccountPool {
     const now = this.now();
     const free = states.filter((state) => state.cooldownUntil <= now);
 
-    if (free.length > 0) return this.lease(pickLeastRecentlyUsed(free), now);
+    if (free.length > 0) {
+      // An account already running its allowance is passed over while another is idle.
+      // Advisory only: `isBusy` is the concurrency gate's opinion, and if everything is
+      // busy we still hand one out and let the gate do the queueing.
+      const idle = free.filter((state) => !isBusy(state.account.id));
+      return this.lease(pickLeastRecentlyUsed(idle.length > 0 ? idle : free), now);
+    }
 
     const authoritative = states.filter((state) => state.cooldownAuthoritative);
     if (authoritative.length === states.length) {
