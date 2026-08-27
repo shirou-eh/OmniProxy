@@ -12,7 +12,7 @@ import {
 } from '@omniproxy/dialect-anthropic';
 import { collectUms, type OmniError } from '@omniproxy/schema';
 import { RoutingError, resolveRoute, type Route } from './router.js';
-import type { DialectHooks, RefusalKind, RequestPlan } from './dialect.js';
+import type { DialectHooks, DialectPlugin, RefusalKind, RequestPlan } from './dialect.js';
 
 /**
  * `POST /v1/messages`.
@@ -229,3 +229,11 @@ function sendJson(
   });
   response.end(body);
 }
+
+/** Mounted on `POST /v1/messages`. */
+export const anthropicPlugin: DialectPlugin = {
+  name: 'anthropic',
+  dialect: anthropicDialect as unknown as DialectHooks<never>,
+  paths: ['/v1/messages'],
+  match: (path) => (path === '/v1/messages' ? {} : undefined),
+};

@@ -74,6 +74,21 @@ A request tries one account and moves to the next **only if the first fails befo
 provider has started answering** — after that the message has been spent, and a second
 attempt would spend another. One account and a hundred take the same code path.
 
+**A fifth protocol is a file, not a fork.** The four above are ordinary dialect
+plugins, mounted the same way yours is — there is no privileged route into the gateway
+that a plugin cannot take. Write a `.js` file that exports one and point `--dialect` at
+it; it is mounted *ahead* of the built-ins, so it may also replace one of them:
+
+```bash
+omniproxy serve --dialect ./my-protocol.mjs
+```
+
+Routing, the account pool, the concurrency gate and the retry rule are all shared, so a
+dialect is usually three functions and forty lines. The walkthrough, with a complete
+working example, is [`docs/omniproxy/07-writing-a-dialect.md`](docs/omniproxy/07-writing-a-dialect.md).
+Note that a dialect file is code and runs with the gateway's accounts: nothing is ever
+loaded implicitly, only paths you name on the command line.
+
 **The capture pipeline and engine.** A provider is described by a `provider.yaml` and
 executed by generic code — no adapter is written from a guess, only from recorded
 traffic (§12.1).
@@ -93,7 +108,7 @@ client, the whole flow runs end to end against a protocol-faithful local simulat
 **nothing has been confirmed against the live service**. See
 [`docs/providers/deepseek-web.md`](docs/providers/deepseek-web.md).
 
-**839 tests**, on Windows and Linux, including golden parity tests that run the same
+**868 tests**, on Windows and Linux, including golden parity tests that run the same
 DeepSeek stream frames — and the same conversations and tool-call markup — through the
 real legacy parser and the new engine, and compare them byte for byte.
 
@@ -113,6 +128,7 @@ about the legacy server changed — not one line of its code was edited during t
 | [`docs/omniproxy/04-phase-1-plan.md`](docs/omniproxy/04-phase-1-plan.md) | The build journal, PR by PR: the capture pipeline, then the gateway |
 | [`docs/omniproxy/05-reliability-charter.md`](docs/omniproxy/05-reliability-charter.md) | Ten invariants, each with a test |
 | [`docs/omniproxy/06-hackability-charter.md`](docs/omniproxy/06-hackability-charter.md) | Your right to rewire any of it |
+| [`docs/omniproxy/07-writing-a-dialect.md`](docs/omniproxy/07-writing-a-dialect.md) | Adding a protocol of your own, without a fork |
 | [`docs/omniproxy/adr/`](docs/omniproxy/adr/) | Every contested decision and why it went that way |
 
 Two principles run through all of it:
@@ -224,6 +240,22 @@ omniproxy serve --accounts ./accounts.json
 как провайдер начал отвечать** — после этого сообщение уже списано, и второй заход
 списал бы второе. Один аккаунт и сотня идут по одному и тому же коду.
 
+**Пятый протокол — это файл, а не форк.** Четыре встроенных диалекта — обычные плагины,
+смонтированные ровно тем же способом, что и ваш: привилегированного входа в шлюз, до
+которого плагин не дотягивается, нет. Напишите `.js`-файл, экспортирующий диалект, и
+укажите `--dialect`; он монтируется **перед** встроенными, то есть может и заменить
+любой из них:
+
+```bash
+omniproxy serve --dialect ./my-protocol.mjs
+```
+
+Маршрутизация, пул аккаунтов, ворота конкурентности и правило ретрая общие, поэтому
+диалект — это обычно три функции и сорок строк. Разбор с полным рабочим примером —
+[`docs/omniproxy/07-writing-a-dialect.md`](docs/omniproxy/07-writing-a-dialect.md).
+Учтите: файл диалекта — это код, и он исполняется с аккаунтами шлюза; неявно не
+загружается ничего, только пути, названные в командной строке.
+
 **Конвейер захвата и движок.** Провайдер описывается файлом `provider.yaml` и
 исполняется общим кодом. Адаптер никогда не пишется по догадке — только по записанному
 трафику (§12.1).
@@ -243,7 +275,7 @@ omniproxy provider draft <bundle>          # черновик provider.yaml, в�
 **против живого сервиса не подтверждено ничего**. Подробности —
 [`docs/providers/deepseek-web.md`](docs/providers/deepseek-web.md).
 
-**839 тестов**, на Windows и Linux, включая golden-тесты, которые гоняют одни и те же
+**868 тестов**, на Windows и Linux, включая golden-тесты, которые гоняют одни и те же
 кадры потока DeepSeek — и те же диалоги и ту же разметку tool-call — через настоящий
 парсер legacy и через новый движок и сравнивают результат побайтно.
 

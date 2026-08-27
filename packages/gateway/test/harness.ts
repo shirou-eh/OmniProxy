@@ -12,6 +12,7 @@ import type { ProviderDeclaration } from '@omniproxy/schema';
 import { fetchHttpClient } from '@omniproxy/transport';
 import { AccountPool, type Account } from '../src/accounts.js';
 import { ConcurrencyGate } from '../src/gate.js';
+import type { DialectPlugin } from '../src/dialect.js';
 import { serve, type RunningGateway } from '../src/serve.js';
 
 /**
@@ -46,6 +47,8 @@ export interface HarnessOptions {
   host?: string;
   concurrency?: number;
   gate?: ConcurrencyGate;
+  /** Dialects of your own, mounted ahead of the built-in four. */
+  dialects?: readonly DialectPlugin[];
 }
 
 export interface Started {
@@ -84,6 +87,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Starte
     env: { DEEPSEEK_WASM_URL: `${sim.url}${simWasmPath()}` },
     port: 0,
     log: (line) => logs.push(line),
+    ...(options.dialects ? { dialects: options.dialects } : {}),
     ...(options.apiKey ? { apiKey: options.apiKey } : {}),
     ...(options.host ? { host: options.host } : {}),
   });

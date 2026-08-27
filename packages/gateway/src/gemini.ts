@@ -12,7 +12,7 @@ import {
   type GenerateContentRequest,
 } from '@omniproxy/dialect-gemini';
 import { collectUms, type OmniError, type ProviderDeclaration, type UMSEvent } from '@omniproxy/schema';
-import type { DialectHooks, Refusal, RefusalKind, RequestPlan } from './dialect.js';
+import type { DialectHooks, DialectPlugin, Refusal, RefusalKind, RequestPlan } from './dialect.js';
 import { sendJson } from './openai.js';
 import { listModelIds, resolveRoute, RoutingError, type Route } from './router.js';
 
@@ -303,3 +303,37 @@ function refusal(
 }
 
 export { parseModelPath };
+
+/**
+ * Mounted on `:generateContent` and `:streamGenerateContent`, with Google's two
+ * provider-free endpoints alongside.
+ *
+ * `countTokens` is answered here rather than in the request loop because it reaches no
+ * provider and spends no message — which is also why the matcher declines it.
+ */
+export const geminiPlugin: DialectPlugin = {
+  name: 'gemini',
+  dialect: geminiDialect as unknown as DialectHooks<never>,
+  paths: ['/v1beta/models/<model>:generateContent', '/v1beta/models', '/v1beta/models/<model>:countTokens'],
+
+  match: (path) => {
+    const parsed = parseModelPath(path);
+    if (!parsed || parsed.method === 'countTokens') return undefined;
+    return { model: parsed.model, method: parsed.method };
+  },
+
+  async side(request) {
+    // `beta` required. Plain `/v1/models` is the same word in three protocols with
+    // three shapes, so the gateway answers that one itself with a superset; serving
+    // Google's envelope there would break the OpenAI and Anthropic SDKs.
+    if (request.method === 'GET' && /^\/v1beta\d*\/models$/.test(request.path)) {
+      return { status: 200, body: geminiModels(request.providers) };
+    }
+
+    const counting = parseModelPath(request.path);
+    if (request.method === 'POST' && counting?.method === 'countTokens') {
+      return countTokens(await request.body(), request.providers, counting.model);
+    }
+    return undefined;
+  },
+};

@@ -9,7 +9,7 @@ import {
   type ChatCompletionRequest,
 } from '@omniproxy/dialect-openai';
 import { collectUms, type OmniError, type UMSEvent } from '@omniproxy/schema';
-import type { DialectHooks, Refusal, RefusalKind, RequestPlan } from './dialect.js';
+import type { DialectHooks, DialectPlugin, Refusal, RefusalKind, RequestPlan } from './dialect.js';
 import { resolveRoute, RoutingError, type Route } from './router.js';
 
 /** `POST /v1/chat/completions`. */
@@ -272,3 +272,17 @@ export function sendJson(
   });
   response.end(body);
 }
+
+/**
+ * Mounted on `POST /v1/chat/completions`.
+ *
+ * `/v1/models` is deliberately not claimed here: OpenAI and Anthropic both define that
+ * path and disagree about the field names, so the gateway answers it once with a
+ * superset rather than letting one dialect own it.
+ */
+export const openAiPlugin: DialectPlugin = {
+  name: 'openai',
+  dialect: openAiDialect as unknown as DialectHooks<never>,
+  paths: ['/v1/chat/completions'],
+  match: (path) => (path === '/v1/chat/completions' ? {} : undefined),
+};

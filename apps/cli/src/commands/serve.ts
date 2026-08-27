@@ -7,10 +7,12 @@ import {
   AccountFileError,
   AccountPool,
   listModelIds,
+  loadDialects,
   parseAccountsFile,
   serve,
   ServeError,
   type Account,
+  type DialectPlugin,
   type RunningGateway,
 } from '@omniproxy/gateway';
 import { fetchHttpClient } from '@omniproxy/transport';
@@ -46,6 +48,9 @@ Options:
   --api-key <secret>    Require it from callers. Also read from OMNIPROXY_API_KEY.
   --provider <id>       Serve only this provider. May be given more than once.
   --provider-dir <dir>  Extra directory to search. May be given more than once.
+  --dialect <path>      A .js file (or a directory of them) exporting a dialect of
+                        your own. Mounted ahead of the built-in four, so it may also
+                        replace one. Repeatable. See docs/omniproxy/07-writing-a-dialect.md.
   --env <K=V>           Value for {{env.K}} in a declaration. Repeatable.
   -h, --help            Show this help.
 
@@ -84,6 +89,7 @@ export async function runServe(
         'api-key': { type: 'string' },
         provider: { type: 'string', multiple: true },
         'provider-dir': { type: 'string', multiple: true },
+        dialect: { type: 'string', multiple: true },
         env: { type: 'string', multiple: true },
         help: { type: 'boolean', short: 'h' },
       },
@@ -164,6 +170,24 @@ export async function runServe(
   const pool = new AccountPool(accounts);
   const apiKey = (parsed.values['api-key'] as string | undefined) ?? io.env['OMNIPROXY_API_KEY'];
 
+  // ── the dialects ──
+  const dialects: DialectPlugin[] = [];
+  const dialectPaths = parsed.values.dialect as string[] | undefined;
+  if (dialectPaths && dialectPaths.length > 0) {
+    // Said once, plainly, and then done: a dialect file is code, and it runs with this
+    // process's privileges and its accounts. Nothing is loaded that was not named here.
+    io.err('warning: --dialect runs code from those files with this gateway\'s accounts');
+    for (const loaded of await loadDialects(dialectPaths.map((path) => resolve(io.cwd, path)))) {
+      if (!loaded.plugin) {
+        // Named, not swallowed, and not fatal — the same rule the provider modules get.
+        io.err(`warning: ${loaded.source} is not a dialect and will not be mounted: ${loaded.error}`);
+        continue;
+      }
+      io.err(`dialect "${loaded.plugin.name}" mounted from ${loaded.source}`);
+      dialects.push(loaded.plugin);
+    }
+  }
+
   // ── the socket ──
   let gateway: RunningGateway;
   try {
@@ -174,6 +198,7 @@ export async function runServe(
       env: { ...io.env, ...parseEnvPairs(parsed.values.env as string[] | undefined) },
       port,
       log: (line) => io.err(line),
+      ...(dialects.length > 0 ? { dialects } : {}),
       ...(parsed.values.host ? { host: parsed.values.host as string } : {}),
       ...(apiKey ? { apiKey } : {}),
     });

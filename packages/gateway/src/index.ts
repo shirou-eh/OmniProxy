@@ -10,11 +10,21 @@
 export { createGatewayHandler, asOmniError, needsApiKey, corsHeaders, MAX_BODY_BYTES } from './server.js';
 export type { GatewayOptions, GatewayHandler } from './server.js';
 
-export { openAiDialect, numericParams } from './openai.js';
-export { anthropicDialect } from './anthropic.js';
-export { geminiDialect, geminiModels, countTokens } from './gemini.js';
-export { ollamaDialect, ollamaTags, ollamaShow, ollamaVersion } from './ollama.js';
-export type { DialectHooks, RequestPlan, Refusal, RefusalKind, RespondContext } from './dialect.js';
+export { openAiDialect, openAiPlugin, numericParams } from './openai.js';
+export { anthropicDialect, anthropicPlugin } from './anthropic.js';
+export { geminiDialect, geminiPlugin, geminiModels, countTokens } from './gemini.js';
+export { ollamaDialect, ollamaPlugin, ollamaTags, ollamaShow, ollamaVersion } from './ollama.js';
+export type {
+  DialectHooks,
+  DialectPlugin,
+  RequestPlan,
+  Refusal,
+  RefusalKind,
+  RespondContext,
+  RouteContext,
+  SideRequest,
+  SideResult,
+} from './dialect.js';
 
 export { serve, isLoopback, ServeError } from './serve.js';
 export type { ServeOptions, RunningGateway } from './serve.js';
@@ -27,3 +37,6 @@ export type { GateOptions, Release } from './gate.js';
 
 export { AccountPool, parseAccountsFile, AccountFileError } from './accounts.js';
 export type { Account, AccountLease, AccountSnapshot, PoolOptions } from './accounts.js';
+
+export { loadDialects, asPlugin } from './dialects.js';
+export type { LoadedDialect } from './dialects.js';

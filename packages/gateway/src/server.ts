@@ -12,12 +12,18 @@ import {
 } from '@omniproxy/engine-declarative';
 import type { OmniError, ProviderDeclaration, UMSEvent } from '@omniproxy/schema';
 import { AccountPool, type Account } from './accounts.js';
-import { anthropicDialect } from './anthropic.js';
-import type { DialectHooks, RouteContext, RequestPlan } from './dialect.js';
+import { anthropicPlugin } from './anthropic.js';
+import type {
+  DialectHooks,
+  DialectPlugin,
+  RouteContext,
+  RequestPlan,
+  SideRequest,
+} from './dialect.js';
 import { ConcurrencyGate, gateKey, GateRefused, type Release } from './gate.js';
-import { countTokens, geminiDialect, geminiModels, parseModelPath } from './gemini.js';
-import { ollamaDialect, ollamaShow, ollamaTags, ollamaVersion } from './ollama.js';
-import { openAiDialect, sendJson } from './openai.js';
+import { geminiPlugin } from './gemini.js';
+import { ollamaPlugin } from './ollama.js';
+import { openAiDialect, openAiPlugin, sendJson } from './openai.js';
 import { listModelIds, type Route } from './router.js';
 
 /**
@@ -61,6 +67,13 @@ export interface GatewayOptions {
    * that pairing, not this function.
    */
   apiKey?: string;
+  /**
+   * Dialects to mount ahead of the built-in four.
+   *
+   * Ahead, not behind: a plugin that claims `/v1/chat/completions` replaces ours. It is
+   * your gateway, and the shadowing is announced in the log rather than refused.
+   */
+  dialects?: readonly DialectPlugin[];
   env?: Record<string, string | undefined>;
   /** Injectable so tests are not at the mercy of the clock. */
   now?: () => number;
@@ -80,6 +93,8 @@ interface Runtime {
   transformContext: TransformContext;
   gate: ConcurrencyGate;
   log(line: string): void;
+  /** User plugins first, then the built-ins. Fixed when the handler is created. */
+  routes: readonly DialectPlugin[];
 }
 
 /**
@@ -89,75 +104,78 @@ interface Runtime {
  * that posts an Anthropic body to the OpenAI path has made a mistake and deserves to be
  * told so, rather than served by accident.
  *
- * A matcher rather than a lookup table because Google puts the model and the operation
- * in the URL (`/v1beta/models/deepseek-web/deepseek-chat:streamGenerateContent`), which
- * a fixed path cannot express — and the qualified model name contains a slash, so the
- * segment cannot be read as one word either.
+ * These four are ordinary `DialectPlugin`s, mounted the same way a user's own is. That
+ * is the point: there is no privileged route into the gateway, so a protocol we have
+ * never heard of is not a fork, it is a file (`docs/omniproxy/07-writing-a-dialect.md`).
  */
-interface DialectRoute {
-  name: string;
-  dialect: DialectHooks<never>;
-  match(path: string): RouteContext | undefined;
-}
-
-const DIALECT_ROUTES: DialectRoute[] = [
-  {
-    name: 'openai',
-    dialect: openAiDialect as unknown as DialectHooks<never>,
-    match: (path) => (path === '/v1/chat/completions' ? {} : undefined),
-  },
-  {
-    name: 'anthropic',
-    dialect: anthropicDialect as unknown as DialectHooks<never>,
-    match: (path) => (path === '/v1/messages' ? {} : undefined),
-  },
-  {
-    name: 'ollama',
-    dialect: ollamaDialect as unknown as DialectHooks<never>,
-    match: (path) =>
-      path === '/api/chat'
-        ? { endpoint: 'chat' }
-        : path === '/api/generate'
-          ? { endpoint: 'generate' }
-          : undefined,
-  },
-  {
-    name: 'gemini',
-    dialect: geminiDialect as unknown as DialectHooks<never>,
-    match: (path) => {
-      const parsed = parseModelPath(path);
-      if (!parsed) return undefined;
-      // `countTokens` is answered separately, before the request loop: it reaches no
-      // provider and spends no account.
-      if (parsed.method === 'countTokens') return undefined;
-      return { model: parsed.model, method: parsed.method };
-    },
-  },
+const BUILT_IN_DIALECTS: readonly DialectPlugin[] = [
+  openAiPlugin,
+  anthropicPlugin,
+  ollamaPlugin,
+  geminiPlugin,
 ];
 
+/**
+ * Representative paths of the built-ins, used for one thing only: noticing when a
+ * user's plugin takes one over, so the log says so instead of the change being silent.
+ */
+const BUILT_IN_PATHS = [
+  '/v1/chat/completions',
+  '/v1/messages',
+  '/api/chat',
+  '/api/generate',
+  '/v1beta/models/m:generateContent',
+];
+
+function mount(
+  extra: readonly DialectPlugin[],
+  log: (line: string) => void,
+): readonly DialectPlugin[] {
+  for (const plugin of extra) {
+    for (const path of BUILT_IN_PATHS) {
+      // Warned about once, then done: overriding a built-in is a supported thing to
+      // want, and a gateway that refused it would be ours rather than yours.
+      if (plugin.match(path, 'POST')) {
+        log(`gateway: dialect "${plugin.name}" answers ${path} instead of the built-in one`);
+      }
+    }
+  }
+  return [...extra, ...BUILT_IN_DIALECTS];
+}
+
 /** The dialect a caller was aiming at, so a refusal is phrased in their protocol. */
-function routeFor(path: string): { dialect: DialectHooks<never>; context: RouteContext } | undefined {
-  for (const route of DIALECT_ROUTES) {
-    const context = route.match(path);
+function routeFor(
+  routes: readonly DialectPlugin[],
+  path: string,
+  method: string,
+): { dialect: DialectHooks<never>; context: RouteContext } | undefined {
+  for (const route of routes) {
+    const context = route.match(path, method);
     if (context) return { dialect: route.dialect, context };
   }
   return undefined;
 }
 
 export function createGatewayHandler(options: GatewayOptions): GatewayHandler {
+  const log = options.log ?? ((): void => {});
   const runtime: Runtime = {
     now: options.now ?? (() => Date.now()),
     uuid: options.uuid ?? (() => randomUUID()),
     transforms: options.transforms ?? new TransformRegistry(),
     transformContext: options.transformContext ?? defaultTransformContext(),
     gate: options.gate ?? new ConcurrencyGate(),
-    log: options.log ?? (() => {}),
+    log,
+    routes: mount(options.dialects ?? [], log),
   };
 
   return async function handle(request, response) {
     const url = new URL(request.url ?? '/', 'http://localhost');
     const path = url.pathname.replace(/\/+$/, '') || '/';
+    const method = request.method ?? 'GET';
     const cors = corsHeaders(request);
+    // Read at most once however many handlers ask for it, so looking at a body in a
+    // side endpoint never consumes the one the request loop needs.
+    const body = bodyOnce(request);
 
     try {
       if (request.method === 'OPTIONS') {
@@ -172,7 +190,7 @@ export function createGatewayHandler(options: GatewayOptions): GatewayHandler {
       if (needsApiKey(request, url, options.apiKey)) {
         // Phrased by whichever dialect the caller was aiming at, so their client
         // surfaces an auth error rather than an unrecognised payload.
-        const dialect = routeFor(path)?.dialect ?? openAiDialect;
+        const dialect = routeFor(runtime.routes, path, method)?.dialect ?? openAiDialect;
         const refused = dialect.refuse(
           401,
           'authentication',
@@ -182,44 +200,37 @@ export function createGatewayHandler(options: GatewayOptions): GatewayHandler {
         return sendJson(response, refused.status, refused.body, cors);
       }
 
-      if (path === '/v1/models' && request.method === 'GET') {
+      // The endpoints that reach no provider and spend no account, each owned by the
+      // dialect whose clients call it. A user's plugin is asked first, so it can answer
+      // a path of its own — or take over one of ours.
+      const side: SideRequest = {
+        path,
+        method,
+        url,
+        providers: options.providers,
+        body: () => body.json(),
+        now: runtime.now,
+      };
+      for (const plugin of runtime.routes) {
+        const answered = await plugin.side?.(side);
+        if (answered) {
+          return sendJson(response, answered.status, answered.body, {
+            ...cors,
+            ...answered.headers,
+          });
+        }
+      }
+
+      if (path === '/v1/models' && method === 'GET') {
         return sendJson(response, 200, models(options, runtime), cors);
       }
 
-      if (/^\/v1(?:beta\d*)?\/models$/.test(path) && request.method === 'GET') {
-        return sendJson(response, 200, geminiModels(options.providers), cors);
-      }
-
-      if (path === '/api/tags' && request.method === 'GET') {
-        return sendJson(response, 200, ollamaTags(options.providers, runtime.now()), cors);
-      }
-
-      if (path === '/api/version' && request.method === 'GET') {
-        return sendJson(response, 200, ollamaVersion(), cors);
-      }
-
-      if (path === '/api/show' && request.method === 'POST') {
-        const body = (await readJsonBody(request)) as { model?: string; name?: string } | undefined;
-        const shown = ollamaShow(options.providers, body?.model ?? body?.name);
-        return sendJson(response, shown.status, shown.body, cors);
-      }
-
-      const counting = parseModelPath(path);
-      if (counting?.method === 'countTokens' && request.method === 'POST') {
-        const counted = countTokens(
-          await readJsonBody(request),
-          options.providers,
-          counting.model,
-        );
-        return sendJson(response, counted.status, counted.body, cors);
-      }
-
-      const matched = routeFor(path);
-      if (matched && request.method === 'POST') {
+      const matched = routeFor(runtime.routes, path, method);
+      if (matched && method === 'POST') {
         return await handleCompletion(
           matched.dialect,
           matched.context,
-          request,
+          body,
           response,
           options,
           runtime,
@@ -229,10 +240,8 @@ export function createGatewayHandler(options: GatewayOptions): GatewayHandler {
       const refused = (matched?.dialect ?? openAiDialect).refuse(
         404,
         'not_found',
-        `no route for ${request.method} ${path}`,
-        'This build serves /v1/chat/completions, /v1/messages, ' +
-          '/v1beta/models/<model>:generateContent, /api/chat, /api/generate, ' +
-          '/v1/models and /health.',
+        `no route for ${method} ${path}`,
+        `This build serves ${servedPaths(runtime.routes)}, /v1/models and /health.`,
       );
       return sendJson(response, refused.status, refused.body, cors);
     } catch (error) {
@@ -256,11 +265,18 @@ export function createGatewayHandler(options: GatewayOptions): GatewayHandler {
 
 /* ─────────────────────────────────── endpoints ─────────────────────────────────── */
 
+/** Every path a mounted dialect claims, for a 404 that says what does exist. */
+function servedPaths(routes: readonly DialectPlugin[]): string {
+  const paths = routes.flatMap((route) => route.paths ?? []);
+  return paths.length > 0 ? paths.join(', ') : routes.map((route) => route.name).join(', ');
+}
+
 function health(options: GatewayOptions, runtime: Runtime): unknown {
   return {
     status: 'ok',
     time: Math.floor(runtime.now() / 1000),
-    dialects: DIALECT_ROUTES.map((route) => route.name),
+    // In the order they are tried, user plugins first.
+    dialects: runtime.routes.map((route) => route.name),
     providers: options.providers.map((provider) => ({
       id: provider.id,
       // Reported as declared. A provider never verified against the live service says
@@ -310,14 +326,14 @@ function models(options: GatewayOptions, runtime: Runtime): unknown {
 async function handleCompletion<T>(
   dialect: DialectHooks<T>,
   routeContext: RouteContext,
-  request: IncomingMessage,
+  reader: BodyReader,
   response: ServerResponse,
   options: GatewayOptions,
   runtime: Runtime,
 ): Promise<void> {
   let body: unknown;
   try {
-    body = JSON.parse(await readBody(request));
+    body = JSON.parse(await reader.text());
   } catch (error) {
     const tooLarge = (error as Error).message === BODY_TOO_LARGE;
     const refused = tooLarge
@@ -682,13 +698,32 @@ export function corsHeaders(request: IncomingMessage): Record<string, string> {
 export const MAX_BODY_BYTES = 32 * 1024 * 1024;
 const BODY_TOO_LARGE = 'request body too large';
 
-/** The body as JSON, or `undefined` when it is not. Used by the bodyless endpoints. */
-async function readJsonBody(request: IncomingMessage): Promise<unknown> {
-  try {
-    return JSON.parse(await readBody(request));
-  } catch {
-    return undefined;
-  }
+/**
+ * The request body, read once and shared.
+ *
+ * A side endpoint that peeks at the body would otherwise consume the stream the request
+ * loop needs, and the symptom — an empty conversation, only when some plugin happens to
+ * look first — is the kind of bug that takes an afternoon to find.
+ */
+interface BodyReader {
+  text(): Promise<string>;
+  /** The body as JSON, or `undefined` when there is none or it does not parse. */
+  json(): Promise<unknown>;
+}
+
+function bodyOnce(request: IncomingMessage): BodyReader {
+  let raw: Promise<string> | undefined;
+  const text = (): Promise<string> => (raw ??= readBody(request));
+  return {
+    text,
+    async json() {
+      try {
+        return JSON.parse(await text());
+      } catch {
+        return undefined;
+      }
+    },
+  };
 }
 
 async function readBody(request: IncomingMessage): Promise<string> {

@@ -13,7 +13,7 @@ import {
   type OllamaRequest,
 } from '@omniproxy/dialect-ollama';
 import { collectUms, type OmniError, type ProviderDeclaration, type UMSEvent } from '@omniproxy/schema';
-import type { DialectHooks, Refusal, RefusalKind, RequestPlan } from './dialect.js';
+import type { DialectHooks, DialectPlugin, Refusal, RefusalKind, RequestPlan } from './dialect.js';
 import { sendJson } from './openai.js';
 import { listModelIds, resolveRoute, RoutingError, type Route } from './router.js';
 
@@ -303,3 +303,34 @@ function modelOf(body: unknown): string {
 }
 
 export type { RefusalKind };
+
+/**
+ * Mounted on Ollama's two completion endpoints, with the three a client calls before
+ * it chats: the model list, the model description and the version.
+ */
+export const ollamaPlugin: DialectPlugin = {
+  name: 'ollama',
+  dialect: ollamaDialect as unknown as DialectHooks<never>,
+  paths: ['/api/chat', '/api/generate', '/api/tags', '/api/show', '/api/version'],
+
+  match: (path) => {
+    if (path === '/api/chat') return { endpoint: 'chat' };
+    if (path === '/api/generate') return { endpoint: 'generate' };
+    return undefined;
+  },
+
+  async side(request) {
+    if (request.method === 'GET' && request.path === '/api/tags') {
+      return { status: 200, body: ollamaTags(request.providers, request.now()) };
+    }
+    if (request.method === 'GET' && request.path === '/api/version') {
+      return { status: 200, body: ollamaVersion() };
+    }
+    if (request.method === 'POST' && request.path === '/api/show') {
+      // Ollama's own clients send either spelling, depending on their vintage.
+      const body = (await request.body()) as { model?: string; name?: string } | undefined;
+      return ollamaShow(request.providers, body?.model ?? body?.name);
+    }
+    return undefined;
+  },
+};
