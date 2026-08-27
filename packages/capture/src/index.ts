@@ -3,7 +3,7 @@
  *
  * Implemented so far: HAR import and stream reassembly (PR-1), sanitization and the
  * fixture gate (PR-2), analysis and capture diffing (PR-3). Still to come: the
- * declaration draft generator (PR-5) and the CDP recorder (PR-7).
+ * declaration draft generator. Still to come: the browser-based recorder.
  * See docs/omniproxy/04-phase-1-plan.md.
  */
 
@@ -12,6 +12,9 @@ export type { Har, ImportHarOptions } from './har.js';
 
 export { analyzeBundle, classifyEntry, findValueLinks, findPollGroups } from './analyze.js';
 export type { AnalysisResult, AnalyzedStep, ValueLink } from './analyze.js';
+
+export { draftDeclaration } from './draft.js';
+export type { DraftOptions, DraftResult } from './draft.js';
 
 export { diffCaptures, applyVolatileFields } from './diff.js';
 export type { CaptureDiff, EntryDiff } from './diff.js';

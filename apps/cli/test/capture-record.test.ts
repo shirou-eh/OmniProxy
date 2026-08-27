@@ -242,3 +242,74 @@ describe('omniproxy capture record', () => {
     expect(JSON.parse(fixture).sanitized).toBe(true);
   });
 });
+
+/**
+ * The onboarding conveyor, end to end: record → sanitize → draft.
+ *
+ * This is also the honest measurement risk R-2 asked for. The claim behind the whole
+ * declarative approach is that most providers can be described without code; the way
+ * to keep that claim honest is to run the conveyor on a real recording and count what
+ * a person still has to do afterwards. The numbers below are what DeepSeek costs, and
+ * DeepSeek is a class A provider — proof of work, session handshake, patch stream — so
+ * it is close to the hard end of the range.
+ */
+describe('the conveyor: record, sanitize, draft', () => {
+  it('produces a draft that validates, and names exactly what is left to a human', async () => {
+    sim = await startDeepSeekSim({ token: TOKEN, reply: 'Привет' });
+    const modules = await moduleFor(sim);
+    expect(await run(recordArgs(modules, sim), io)).toBe(EXIT_OK);
+
+    const raw = (await readdir(outDir))[0] as string;
+    const fixtures = join(workDir, 'fixtures');
+    expect(await run(['capture', 'sanitize', join(outDir, raw), '--out', fixtures], io)).toBe(EXIT_OK);
+    const fixture = join(fixtures, (await readdir(fixtures))[0] as string);
+
+    const draftPath = join(workDir, 'draft', 'provider.yaml');
+    io.stdout.length = 0;
+    io.stderr.length = 0;
+    expect(await run(['provider', 'draft', fixture, '--provider', 'drafted', '--out', draftPath], io)).toBe(
+      EXIT_OK,
+    );
+
+    const yaml = await readFile(draftPath, 'utf8');
+
+    // What the recording settled, and the drafter got right without help:
+    expect(yaml).toMatch(/path: \/api\/v0\/chat\/create_pow_challenge/);
+    expect(yaml).toMatch(/path: \/api\/v0\/chat_session\/create/);
+    expect(yaml).toMatch(/path: \/api\/v0\/chat\/completion/);
+    expect(yaml).toMatch(/sessionId: \$\.data\.biz_data/);
+    expect(yaml).toMatch(/prompt: '\{\{req\.prompt\}\}'/);
+    expect(yaml).toMatch(/parent_message_id: '\{\{state\.parentMessageId\|null-if-empty\}\}'/);
+    expect(yaml).toMatch(/format: json-patch/);
+    expect(yaml).toMatch(/kind: bearer/);
+
+    // What it refused to invent, and said so instead:
+    expect(yaml).toMatch(/x-ds-pow-response: '\{\{vars\.TODO\}\}'/);
+    expect(yaml).toMatch(/which fragment type feeds which channel/);
+    expect(yaml).toMatch(/what is this call for\?/);
+
+    // And what it never leaked into a file people paste into issues:
+    expect(yaml).not.toContain(TOKEN);
+
+    // Four decisions remain, all of them genuinely decisions: which transform computes
+    // the proof of work, what the fragment types mean, what the model is called, and
+    // what the error shapes are. Nothing here could have been read off a recording of
+    // one successful conversation.
+    const todoCount = (yaml.match(/TODO\(capture\)/g) ?? []).length;
+    expect(todoCount).toBeGreaterThanOrEqual(4);
+    expect(todoCount).toBeLessThanOrEqual(8);
+
+    expect(io.stderr.join('\n')).toMatch(/read every TODO\(capture\) comment/);
+  });
+
+  it('drafts from a raw bundle too, with a warning about what is in it', async () => {
+    sim = await startDeepSeekSim({ token: TOKEN });
+    const modules = await moduleFor(sim);
+    await run(recordArgs(modules, sim), io);
+    const raw = join(outDir, (await readdir(outDir))[0] as string);
+
+    io.stderr.length = 0;
+    expect(await run(['provider', 'draft', raw], io)).toBe(EXIT_OK);
+    expect(io.stderr.join('\n')).toMatch(/not sanitized/);
+  });
+});

@@ -2,6 +2,7 @@ import { CAPTURE_ANALYZE_USAGE, runCaptureAnalyze } from './commands/capture-ana
 import { CAPTURE_IMPORT_USAGE, runCaptureImport } from './commands/capture-import.js';
 import { CAPTURE_RECORD_USAGE, runCaptureRecord } from './commands/capture-record.js';
 import { CAPTURE_SANITIZE_USAGE, runCaptureSanitize } from './commands/capture-sanitize.js';
+import { PROVIDER_DRAFT_USAGE, runProviderDraft } from './commands/provider-draft.js';
 import {
   PROVIDER_LIST_USAGE,
   PROVIDER_VALIDATE_USAGE,
@@ -22,6 +23,7 @@ export const USAGE = `omniproxy — universal relay for provider web APIs
 Usage:
   omniproxy provider list [--provider-dir <dir>]
   omniproxy provider validate [<id>]
+  omniproxy provider draft <bundle.json> [--out <path>]
 
   omniproxy capture record <provider-id> --auth <file.json>
   omniproxy capture import <file.har> --provider <id> --scenario <name>
@@ -47,6 +49,7 @@ const PROVIDER_USAGE = `omniproxy provider — provider modules
 
   list      Show every module found, and where it came from.
   validate  Check modules and report errors and warnings.
+  draft     Turn an analyzed capture into a provider.yaml draft.
 
 A provider module is a directory containing provider.yaml. Yours are found the same
 way ours are, and yours take precedence — see ADR-0003.`;
@@ -97,6 +100,7 @@ export async function run(argv: readonly string[], io: CliIo): Promise<number> {
   if (group === 'provider') {
     if (command === 'list') return runProviderList(rest, io);
     if (command === 'validate') return runProviderValidate(rest, io);
+    if (command === 'draft') return runProviderDraft(rest, io);
     if (command === undefined) {
       io.err('omniproxy: provider needs a subcommand');
       io.err(PROVIDER_USAGE);
@@ -108,6 +112,8 @@ export async function run(argv: readonly string[], io: CliIo): Promise<number> {
       io.out(PROVIDER_LIST_USAGE);
       io.out('');
       io.out(PROVIDER_VALIDATE_USAGE);
+      io.out('');
+      io.out(PROVIDER_DRAFT_USAGE);
       return EXIT_OK;
     }
     io.err(`omniproxy: unknown provider command "${command}"`);

@@ -6,14 +6,16 @@ A universal relay that puts a standard API (OpenAI / Anthropic / Gemini compatib
 front of provider **web interfaces** — the same endpoints your logged-in browser talks
 to — across every modality: text, images, video, audio, music, speech and 3D.
 
-> **Status: rework in progress (phase 0).** The gateway described in
-> [`docs/omniproxy/`](docs/omniproxy/) does not exist yet. What works today is the
-> original single-provider proxy, kept intact under [`legacy/`](legacy/).
-> This README will not claim otherwise until each piece is real and tested.
+> **Status: rework in progress (phase 1 complete).** The capture pipeline, the
+> declarative engine and provider modules work and are tested. **The gateway itself
+> does not exist yet** — there is no `omniproxy serve`, so nothing yet answers an
+> OpenAI-shaped request. Until it does, the working proxy is the original one under
+> [`legacy/`](legacy/). This README will not claim otherwise until each piece is real
+> and tested.
 
 ## What works right now
 
-The original **FreeDeepseekAPI** — an OpenAI-compatible local proxy over the DeepSeek
+**The original FreeDeepseekAPI** — an OpenAI-compatible local proxy over the DeepSeek
 web chat, with an account pool, session recovery and text-emulated tool calling.
 Its own documentation is [`legacy/README.md`](legacy/README.md).
 
@@ -21,6 +23,28 @@ Its own documentation is [`legacy/README.md`](legacy/README.md).
 pnpm install
 pnpm run legacy:start
 ```
+
+**The OmniProxy capture pipeline and engine.** A provider is described by a
+`provider.yaml` and executed by generic code — no adapter is written from a guess, only
+from recorded traffic (§12.1).
+
+```bash
+omniproxy provider list                    # every module found, and where it came from
+omniproxy provider validate deepseek-web   # errors apart from warnings
+omniproxy capture record deepseek-web --auth ./auth.json
+omniproxy capture sanitize <bundle>        # then, and only then, share it
+omniproxy capture analyze <bundle>         # what each call does, and how values flow
+```
+
+`providers/deepseek-web/provider.yaml` is the first real declaration. Its status is
+`unverified`, and that word is exact: every shape in it comes from the working legacy
+client, the whole flow runs end to end against a protocol-faithful local simulator, and
+**nothing has been confirmed against the live service**. See
+[`docs/providers/deepseek-web.md`](docs/providers/deepseek-web.md).
+
+**399 tests**, on Windows and Linux, including a golden parity test that runs the same
+DeepSeek stream frames through the real legacy parser and the new engine and compares
+them byte for byte.
 
 Authentication files now live next to the legacy server. **If you upgraded from
 FreeDeepseekAPI and had `deepseek-auth.json` in the repository root, move it to
@@ -82,15 +106,16 @@ Gemini) поверх **веб-интерфейсов** провайдеров �
 ваш залогиненный браузер — для всех модальностей: текст, изображения, видео, аудио,
 музыка, речь, 3D.
 
-> **Статус: идёт переработка (фаза 0).** Шлюза, описанного в
-> [`docs/omniproxy/`](docs/omniproxy/), пока не существует. Работает исходный
-> одно-провайдерный прокси, сохранённый нетронутым в [`legacy/`](legacy/).
-> Этот README не будет утверждать обратного, пока каждая часть не станет реальной
-> и покрытой тестами.
+> **Статус: идёт переработка (фаза 1 завершена).** Конвейер захвата, декларативный
+> движок и модули провайдеров работают и покрыты тестами. **Самого шлюза пока нет** —
+> команды `omniproxy serve` не существует, отвечать на OpenAI-совместимый запрос ещё
+> нечему. Пока её нет, рабочий прокси — исходный, в [`legacy/`](legacy/). Этот README
+> не будет утверждать обратного, пока каждая часть не станет реальной и покрытой
+> тестами.
 
 ## Что работает сейчас
 
-Исходный **FreeDeepseekAPI** — локальный OpenAI-совместимый прокси поверх веб-чата
+**Исходный FreeDeepseekAPI** — локальный OpenAI-совместимый прокси поверх веб-чата
 DeepSeek: пул аккаунтов, восстановление сессий, текстовая эмуляция tool-calling.
 Его собственная документация — [`legacy/README.md`](legacy/README.md).
 
@@ -98,6 +123,28 @@ DeepSeek: пул аккаунтов, восстановление сессий, 
 pnpm install
 pnpm run legacy:start
 ```
+
+**Конвейер захвата и движок OmniProxy.** Провайдер описывается файлом `provider.yaml` и
+исполняется общим кодом. Адаптер никогда не пишется по догадке — только по записанному
+трафику (§12.1).
+
+```bash
+omniproxy provider list                    # что нашлось и откуда
+omniproxy provider validate deepseek-web   # ошибки отдельно от предупреждений
+omniproxy capture record deepseek-web --auth ./auth.json
+omniproxy capture sanitize <bundle>        # и только после этого делиться
+omniproxy capture analyze <bundle>         # что делает каждый вызов и как текут значения
+```
+
+`providers/deepseek-web/provider.yaml` — первая настоящая декларация. Её статус
+`unverified`, и это слово точное: все формы взяты из работающего legacy-клиента, весь
+поток целиком прогоняется против протокольно достоверного локального симулятора, и
+**против живого сервиса не подтверждено ничего**. Подробности —
+[`docs/providers/deepseek-web.md`](docs/providers/deepseek-web.md).
+
+**399 тестов**, на Windows и Linux, включая golden-тест, который гоняет одни и те же
+кадры потока DeepSeek через настоящий парсер legacy и через новый движок и сравнивает
+результат побайтно.
 
 Файлы авторизации теперь лежат рядом с legacy-сервером. **Если вы обновляетесь с
 FreeDeepseekAPI и у вас был `deepseek-auth.json` в корне репозитория — перенесите его
