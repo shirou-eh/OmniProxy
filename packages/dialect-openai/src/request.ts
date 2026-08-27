@@ -1,3 +1,13 @@
+import {
+  compactSchema,
+  flattenConversation,
+  formatToolDefinitions as renderToolDefinitions,
+  renderContent,
+  type FlattenedPrompt,
+  type ToolDef,
+  type UContent,
+  type UMessage,
+} from '@omniproxy/umr';
 import { z } from 'zod';
 
 /**
@@ -112,165 +122,138 @@ export function parseChatCompletionRequest(body: unknown): ChatCompletionRequest
 }
 
 /**
- * Flattens a conversation into one prompt.
+ * OpenAI's request, as a universal one.
  *
- * Most provider web interfaces have no notion of a message array — they take a string
- * and keep their own history server-side. This is the shape legacy/server.js used
- * against DeepSeek for months, kept deliberately: the role labels, the blank lines,
- * the `[Tool Result]` marker are all things the model has been observed to follow, and
- * changing them for elegance would change the answers.
+ * The rules about which messages survive are legacy's, verbatim, and they are here
+ * rather than in the flattener because they are about what an OpenAI caller wrote: a
+ * turn whose `content` is falsy is dropped, and a turn whose `content` is an empty
+ * array is kept and renders as an empty line. Those two are the same thing to the
+ * flattener and different things to a client, and the golden parity test notices.
  */
-export interface FlattenedPrompt {
-  prompt: string;
-  systemPrompt: string;
+export function toUniversal(messages: readonly ChatMessage[]): UMessage[] {
+  const universal: UMessage[] = [];
+
+  for (const message of messages) {
+    if (message.role === 'system' || message.role === 'developer') {
+      // `developer` is OpenAI's newer name for the same role.
+      if (message.content) universal.push({ role: 'system', content: toContent(message.content) });
+      continue;
+    }
+
+    if (message.role === 'user') {
+      if (message.content) universal.push({ role: 'user', content: toContent(message.content) });
+      continue;
+    }
+
+    if (message.role === 'assistant') {
+      if (message.tool_calls && message.tool_calls.length > 0) {
+        universal.push({
+          role: 'assistant',
+          content: message.tool_calls.map((call) => ({
+            type: 'tool_call' as const,
+            ...(call.id ? { id: call.id } : {}),
+            name: call.function.name,
+            args: call.function.arguments,
+          })),
+        });
+        continue;
+      }
+      if (message.content) {
+        universal.push({ role: 'assistant', content: toContent(message.content) });
+      }
+      continue;
+    }
+
+    // `tool` and `function` are the same thing to a provider that has neither.
+    if (message.content) universal.push({ role: 'tool', content: toContent(message.content) });
+  }
+
+  return universal;
 }
 
+export function toUniversalTools(tools: readonly ChatTool[] | undefined): ToolDef[] | undefined {
+  if (!tools || tools.length === 0) return undefined;
+  return tools.map((tool) => ({
+    name: tool.function.name,
+    ...(tool.function.description !== undefined ? { description: tool.function.description } : {}),
+    ...(tool.function.parameters !== undefined ? { parameters: tool.function.parameters } : {}),
+  }));
+}
+
+/** Flattens an OpenAI conversation. Kept as its own export for the parity test. */
 export function flattenMessages(
   messages: readonly ChatMessage[],
   tools?: readonly ChatTool[],
 ): FlattenedPrompt {
-  let systemPrompt = '';
-  for (const message of messages) {
-    // `developer` is OpenAI's newer name for the same thing.
-    if ((message.role === 'system' || message.role === 'developer') && message.content) {
-      systemPrompt += `${normalizeContent(message.content)}\n`;
-    }
-  }
-  if (tools && tools.length > 0) systemPrompt += formatToolDefinitions(tools);
-
-  let conversation = '';
-  for (const message of messages) {
-    if (message.role === 'system' || message.role === 'developer') continue;
-
-    if (message.role === 'user' && message.content) {
-      conversation += `User: ${normalizeContent(message.content)}\n\n`;
-    } else if (message.role === 'assistant') {
-      if (message.tool_calls && message.tool_calls.length > 0) {
-        for (const call of message.tool_calls) {
-          conversation += `Assistant: TOOL_CALL: ${call.function.name}\narguments: ${call.function.arguments}\n\n`;
-        }
-      } else if (message.content) {
-        conversation += `Assistant: ${normalizeContent(message.content)}\n\n`;
-      }
-    } else if ((message.role === 'tool' || message.role === 'function') && message.content) {
-      // No second per-result limit: one large tool result may be the essential input,
-      // and the global prompt cap is applied once, later, preserving the latest tail.
-      conversation += `[Tool Result]\n${normalizeContent(message.content)}\n\n`;
-    }
-  }
-
-  return { prompt: conversation.trim(), systemPrompt: systemPrompt.trim() };
+  return flattenConversation(toUniversal(messages), toUniversalTools(tools));
 }
 
+function toContent(content: unknown): UContent[] {
+  if (typeof content === 'string') return [{ type: 'text', text: content }];
+  if (!Array.isArray(content)) return [{ type: 'text', text: String(content ?? '') }];
+
+  const parts: UContent[] = [];
+  for (const part of content) {
+    if (typeof part === 'string') {
+      parts.push({ type: 'text', text: part });
+      continue;
+    }
+    if (part === null || typeof part !== 'object') continue;
+
+    const record = part as Record<string, unknown>;
+    const type = record['type'];
+
+    if (type === 'text' || type === 'input_text' || type === 'output_text') {
+      parts.push({ type: 'text', text: typeof record['text'] === 'string' ? record['text'] : '' });
+      continue;
+    }
+    if (type === 'tool_result') {
+      const id = record['tool_use_id'];
+      parts.push({
+        type: 'tool_result',
+        ...(typeof id === 'string' ? { id } : {}),
+        text: normalizeContent(record['content']),
+      });
+      continue;
+    }
+    if (type === 'image_url') {
+      const image = record['image_url'] as { url?: string } | undefined;
+      parts.push({ type: 'image', url: image?.url ?? '' });
+      continue;
+    }
+    if (typeof record['text'] === 'string') {
+      parts.push({ type: 'text', text: record['text'] });
+      continue;
+    }
+    if (typeof record['content'] === 'string') {
+      parts.push({ type: 'text', text: record['content'] });
+      continue;
+    }
+    // Kept as JSON rather than dropped: a model that cannot use the attachment can at
+    // least say so, which beats answering as if nothing had been attached.
+    parts.push({ type: 'unknown', description: JSON.stringify(part) });
+  }
+
+  return parts;
+}
+
+/**
+ * Content as one string, in OpenAI's terms.
+ *
+ * Retained because it is part of this package's surface and is what several call sites
+ * want; it is the same walk as `toContent` followed by `renderContent`.
+ */
 export function normalizeContent(content: unknown): string {
   if (content === null || content === undefined) return '';
   if (typeof content === 'string') return content;
-
-  if (Array.isArray(content)) {
-    return content
-      .map((part) => {
-        if (typeof part === 'string') return part;
-        if (part === null || typeof part !== 'object') return '';
-        const record = part as Record<string, unknown>;
-        const type = record['type'];
-        if (type === 'text' || type === 'input_text' || type === 'output_text') {
-          return typeof record['text'] === 'string' ? record['text'] : '';
-        }
-        if (type === 'tool_result') {
-          return `[Tool Result ${String(record['tool_use_id'] ?? '')}]\n${normalizeContent(record['content'])}`;
-        }
-        if (type === 'image_url') {
-          const image = record['image_url'] as { url?: string } | undefined;
-          // Named, not dropped: a model that cannot see the image can at least say so,
-          // which is a far better failure than answering as if nothing was attached.
-          return `[Image: ${image?.url ?? ''}]`;
-        }
-        if (typeof record['text'] === 'string') return record['text'];
-        if (typeof record['content'] === 'string') return record['content'];
-        return JSON.stringify(part);
-      })
-      .filter((part) => part !== '')
-      .join('\n');
-  }
-
-  return String(content);
+  if (!Array.isArray(content)) return String(content);
+  return renderContent(toContent(content));
 }
 
-/**
- * Tool definitions as instructions in the prompt.
- *
- * This is emulation, and it is labelled as such everywhere it appears
- * (`emulationSupport: 'text-emulated'`). A provider web interface has no tool-calling
- * API; what it has is a model that will follow a format if you ask clearly. How well
- * it follows is unmeasured (risk R-5), and the capability model says `unmeasured`
- * rather than claiming a number nobody has checked.
- */
+/** Tool definitions as prompt instructions, in OpenAI's `{type, function}` shape. */
 export function formatToolDefinitions(tools: readonly ChatTool[]): string {
-  if (tools.length === 0) return '';
-
-  const lines = [
-    '',
-    'You have access to the following tools. To call one, reply with EXACTLY this and nothing else:',
-    '',
-    'TOOL_CALL: <tool_name>',
-    'arguments: <a single line of JSON>',
-    '',
-    'Call one tool at a time and wait for its result before continuing.',
-    'If no tool is needed, answer normally and do not mention the tools.',
-    '',
-    'Tools:',
-  ];
-
-  for (const tool of tools) {
-    lines.push(`- ${tool.function.name}: ${tool.function.description ?? '(no description)'}`);
-    if (tool.function.parameters !== undefined) {
-      lines.push(`  arguments schema: ${JSON.stringify(compactSchema(tool.function.parameters))}`);
-    }
-  }
-
-  return `${lines.join('\n')}\n`;
+  return renderToolDefinitions(toUniversalTools(tools) ?? []);
 }
 
-/**
- * Shrinks a JSON schema to what a model needs to fill it in.
- *
- * Full schemas from real toolchains run to thousands of characters each, and a dozen
- * of them will not fit in a web chat's context alongside the conversation. Names,
- * types, descriptions and which fields are required are what the model uses; `$schema`,
- * `additionalProperties` and `examples` are not.
- */
-export function compactSchema(schema: unknown, depth = 0): unknown {
-  if (schema === null || typeof schema !== 'object' || depth > 4) return schema;
-  if (Array.isArray(schema)) return schema.map((item) => compactSchema(item, depth + 1));
-
-  const source = schema as Record<string, unknown>;
-  const compact: Record<string, unknown> = {};
-
-  for (const key of ['type', 'enum', 'required', 'items', 'properties', 'description']) {
-    if (source[key] === undefined) continue;
-    if (key === 'description' && typeof source[key] === 'string') {
-      const text = source[key] as string;
-      compact[key] = text.length > 200 ? `${text.slice(0, 200)}…` : text;
-      continue;
-    }
-    if (key === 'properties') {
-      // A map of name -> schema, not a schema. Recursing into it as if it were one
-      // filters out every property name and leaves the model an empty object to fill.
-      const properties = source[key];
-      compact[key] =
-        properties !== null && typeof properties === 'object' && !Array.isArray(properties)
-          ? Object.fromEntries(
-              Object.entries(properties as Record<string, unknown>).map(([name, schema]) => [
-                name,
-                compactSchema(schema, depth + 1),
-              ]),
-            )
-          : properties;
-      continue;
-    }
-
-    compact[key] = key === 'items' ? compactSchema(source[key], depth + 1) : source[key];
-  }
-
-  return compact;
-}
+export { compactSchema };
+export type { FlattenedPrompt };

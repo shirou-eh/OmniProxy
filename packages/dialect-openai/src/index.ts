@@ -40,10 +40,17 @@ export type {
   OpenAiErrorBody,
 } from './response.js';
 
+export { toUniversal, toUniversalTools } from './request.js';
+
+/**
+ * Re-exported from @omniproxy/umr, which is where they live now: reading a model's
+ * tool markup back out of ordinary text has nothing to do with OpenAI, and the
+ * Anthropic dialect needs exactly the same parser.
+ */
 export {
   parseEmulatedToolCall,
   looksLikeToolMarkup,
   buildToolCall,
   extractBalancedJson,
-} from './tool-emulation.js';
-export type { EmulatedToolCall, ToolCallParse } from './tool-emulation.js';
+} from '@omniproxy/umr';
+export type { EmulatedToolCall, ToolCallParse } from '@omniproxy/umr';

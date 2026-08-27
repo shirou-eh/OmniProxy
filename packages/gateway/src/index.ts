@@ -7,8 +7,12 @@
  * for. There is no `if (provider === …)` here, and there never will be (§12.3).
  */
 
-export { createGatewayHandler, asOmniError, checkApiKey, corsHeaders, numericParams, MAX_BODY_BYTES } from './server.js';
+export { createGatewayHandler, asOmniError, needsApiKey, corsHeaders, MAX_BODY_BYTES } from './server.js';
 export type { GatewayOptions, GatewayHandler } from './server.js';
+
+export { openAiDialect, numericParams } from './openai.js';
+export { anthropicDialect } from './anthropic.js';
+export type { DialectHooks, RequestPlan, Refusal, RefusalKind, RespondContext } from './dialect.js';
 
 export { serve, isLoopback, ServeError } from './serve.js';
 export type { ServeOptions, RunningGateway } from './serve.js';

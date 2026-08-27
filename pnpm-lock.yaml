@@ -73,11 +73,36 @@ importers:
         specifier: ^2.6.0
         version: 2.9.0
 
+  packages/dialect-anthropic:
+    dependencies:
+      '@omniproxy/schema':
+        specifier: workspace:*
+        version: link:../schema
+      '@omniproxy/umr':
+        specifier: workspace:*
+        version: link:../umr
+      zod:
+        specifier: ^4.0.0
+        version: 4.4.3
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.0
+        version: 22.20.1
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.7(@types/node@22.20.1)(yaml@2.9.0)
+
   packages/dialect-openai:
     dependencies:
       '@omniproxy/schema':
         specifier: workspace:*
         version: link:../schema
+      '@omniproxy/umr':
+        specifier: workspace:*
+        version: link:../umr
       zod:
         specifier: ^4.0.0
         version: 4.4.3
@@ -116,6 +141,9 @@ importers:
 
   packages/gateway:
     dependencies:
+      '@omniproxy/dialect-anthropic':
+        specifier: workspace:*
+        version: link:../dialect-anthropic
       '@omniproxy/dialect-openai':
         specifier: workspace:*
         version: link:../dialect-openai
@@ -128,6 +156,9 @@ importers:
       '@omniproxy/transport':
         specifier: workspace:*
         version: link:../transport
+      '@omniproxy/umr':
+        specifier: workspace:*
+        version: link:../umr
     devDependencies:
       '@omniproxy/provider-sim':
         specifier: workspace:*
@@ -185,6 +216,22 @@ importers:
       '@omniproxy/provider-sim':
         specifier: workspace:*
         version: link:../provider-sim
+      '@types/node':
+        specifier: ^22.10.0
+        version: 22.20.1
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.7(@types/node@22.20.1)(yaml@2.9.0)
+
+  packages/umr:
+    dependencies:
+      '@omniproxy/schema':
+        specifier: workspace:*
+        version: link:../schema
+    devDependencies:
       '@types/node':
         specifier: ^22.10.0
         version: 22.20.1

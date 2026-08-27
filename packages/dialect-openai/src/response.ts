@@ -1,5 +1,5 @@
 import type { FinishReason, OmniError, UMSEvent, Usage } from '@omniproxy/schema';
-import { parseEmulatedToolCall, type EmulatedToolCall } from './tool-emulation.js';
+import { parseEmulatedToolCall, type EmulatedToolCall } from '@omniproxy/umr';
 
 /**
  * The OpenAI response surface, built from UMS and from nothing else.

@@ -19,15 +19,18 @@ import { discoveryOptionsFrom } from './provider-context.js';
 
 export const SERVE_USAGE = `omniproxy serve [options]
 
-Starts the gateway: an OpenAI-compatible API in front of every provider module found.
+Starts the gateway in front of every provider module found. It speaks several client
+protocols at once, over the same accounts and the same providers.
 
-  POST /v1/chat/completions   streaming and non-streaming
+  POST /v1/chat/completions   OpenAI Chat Completions, streaming and not
+  POST /v1/messages           Anthropic Messages, streaming and not
   GET  /v1/models             every alias, qualified and bare
   GET  /health                what is loaded, and how the accounts are doing
 
-Point any OpenAI client at it:
+Point any client at it:
 
-  OPENAI_BASE_URL=http://127.0.0.1:8787/v1  OPENAI_API_KEY=unused
+  OPENAI_BASE_URL=http://127.0.0.1:8787/v1     OPENAI_API_KEY=unused
+  ANTHROPIC_BASE_URL=http://127.0.0.1:8787     ANTHROPIC_API_KEY=unused
 
 Options:
   --port <n>            Default: 8787.
@@ -217,8 +220,9 @@ function report(
   io.out(`  models: ${listModelIds(providers).join(', ')}`);
   io.out('');
   io.out(`  OPENAI_BASE_URL=${gateway.url}/v1`);
+  io.out(`  ANTHROPIC_BASE_URL=${gateway.url}`);
   if (!keyed) {
-    io.out('  OPENAI_API_KEY=unused   (the gateway is on loopback and asks for no key)');
+    io.out('  ..._API_KEY=unused   (the gateway is on loopback and asks for no key)');
   }
   io.out('');
   io.out('Press Ctrl-C to stop.');

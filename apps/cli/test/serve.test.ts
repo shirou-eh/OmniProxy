@@ -68,6 +68,7 @@ describe('omniproxy serve', () => {
     expect(session.out).toContain('deepseek-web');
     expect(session.out).toContain('deepseek-chat');
     expect(session.out).toContain('OPENAI_BASE_URL=');
+    expect(session.out).toContain('ANTHROPIC_BASE_URL=');
   });
 
   it('prints the provider status as declared, and says when nobody is signed in', async () => {
@@ -214,6 +215,6 @@ describe('omniproxy serve', () => {
     expect(session.code).toBe(EXIT_OK);
     expect(session.out).not.toContain('from-the-environment');
     // The "no key" hint is suppressed, because there is one.
-    expect(session.out).not.toContain('OPENAI_API_KEY=unused');
+    expect(session.out).not.toContain('_API_KEY=unused');
   });
 });

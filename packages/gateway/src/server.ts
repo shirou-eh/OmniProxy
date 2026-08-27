@@ -1,15 +1,6 @@
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import {
-  buildChatCompletion,
-  flattenMessages,
-  OpenAiRequestError,
-  parseChatCompletionRequest,
-  toOpenAiError,
-  toOpenAiStream,
-  type ChatCompletionRequest,
-} from '@omniproxy/dialect-openai';
-import {
   DeclarationExecutionError,
   defaultTransformContext,
   executeFlow,
@@ -19,20 +10,18 @@ import {
   type HttpClient,
   type TransformContext,
 } from '@omniproxy/engine-declarative';
-import {
-  collectUms,
-  type OmniError,
-  type ProviderDeclaration,
-  type UMSEvent,
-} from '@omniproxy/schema';
+import type { OmniError, ProviderDeclaration, UMSEvent } from '@omniproxy/schema';
 import { AccountPool, type Account } from './accounts.js';
+import { anthropicDialect } from './anthropic.js';
+import type { DialectHooks, RequestPlan } from './dialect.js';
 import { ConcurrencyGate, gateKey, GateRefused, type Release } from './gate.js';
-import { listModelIds, resolveRoute, RoutingError, type Route } from './router.js';
+import { openAiDialect, sendJson } from './openai.js';
+import { listModelIds, type Route } from './router.js';
 
 /**
  * The gateway.
  *
- * Two decisions shape everything below.
+ * Three decisions shape everything below.
  *
  * **A request carries its own history, and the gateway keeps none.** OpenAI's protocol
  * is stateless — every call sends the whole conversation — while provider web
@@ -41,15 +30,18 @@ import { listModelIds, resolveRoute, RoutingError, type Route } from './router.j
  * and is risk R-6: two callers sharing a session see each other's context, a retried
  * request continues a conversation that has already moved on, and the bug is invisible
  * until an answer is subtly wrong. So each request opens a fresh upstream session with
- * the whole conversation flattened into the prompt. That costs a round trip, and it
- * makes the answer a function of the request and nothing else.
+ * the whole conversation flattened into the prompt (ADR-0008).
  *
  * **A failed attempt may move to another account, but only before the provider has
  * started answering.** After the first content event the answer is committed: the
  * message has been spent, and starting over would bill a second one and could hand the
- * caller a different answer than the one already half-produced. Before that point,
- * retrying costs nothing and catches exactly the failures worth retrying — expired
- * cookies, rate limits, an exhausted daily quota.
+ * caller a different answer than the one already half-produced.
+ *
+ * **Every dialect shares this loop.** Routing, accounts, the gate, the retry rule and
+ * the engine live here; a dialect supplies how to read a request, how to write a
+ * response, and how to phrase a refusal (`dialect.ts`). Adding a protocol touches
+ * nothing in this file except the table below — and if it had required more, the
+ * universal layers would not have been earning their keep.
  */
 
 export interface GatewayOptions {
@@ -61,8 +53,10 @@ export interface GatewayOptions {
   transforms?: TransformRegistry;
   transformContext?: TransformContext;
   /**
-   * Required in `Authorization: Bearer <key>`. When absent the gateway is open, which
-   * is only safe on loopback — `serve` enforces that pairing, not this function.
+   * Required from callers. Accepted as `Authorization: Bearer <key>` or as `x-api-key`,
+   * because OpenAI clients send the first and Anthropic clients send the second. When
+   * absent the gateway is open, which is only safe on loopback — `serve` enforces that
+   * pairing, not this function.
    */
   apiKey?: string;
   env?: Record<string, string | undefined>;
@@ -86,6 +80,18 @@ interface Runtime {
   log(line: string): void;
 }
 
+/**
+ * Which dialect answers which path.
+ *
+ * The endpoint chooses — not a header, and not a guess at the body's shape. A client
+ * that posts an Anthropic body to the OpenAI path has made a mistake and deserves to be
+ * told so, rather than served by accident.
+ */
+const DIALECTS: Record<string, DialectHooks<never>> = {
+  '/v1/chat/completions': openAiDialect as unknown as DialectHooks<never>,
+  '/v1/messages': anthropicDialect as unknown as DialectHooks<never>,
+};
+
 export function createGatewayHandler(options: GatewayOptions): GatewayHandler {
   const runtime: Runtime = {
     now: options.now ?? (() => Date.now()),
@@ -108,46 +114,50 @@ export function createGatewayHandler(options: GatewayOptions): GatewayHandler {
       }
 
       if (path === '/health' || path === '/healthz') {
-        return json(response, 200, health(options, runtime), cors);
+        return sendJson(response, 200, health(options, runtime), cors);
       }
 
-      const unauthorized = checkApiKey(request, options.apiKey);
-      if (unauthorized) return json(response, 401, unauthorized, cors);
+      if (needsApiKey(request, options.apiKey)) {
+        // Phrased by whichever dialect the caller was aiming at, so their client
+        // surfaces an auth error rather than an unrecognised payload.
+        const dialect = DIALECTS[path] ?? openAiDialect;
+        const refused = dialect.refuse(
+          401,
+          'authentication',
+          'invalid api key',
+          'Send the key the gateway was started with as Authorization: Bearer <key>, or as x-api-key.',
+        );
+        return sendJson(response, refused.status, refused.body, cors);
+      }
 
       if (path === '/v1/models' && request.method === 'GET') {
-        return json(response, 200, models(options, runtime), cors);
+        return sendJson(response, 200, models(options, runtime), cors);
       }
 
-      if (path === '/v1/chat/completions' && request.method === 'POST') {
-        return await chatCompletions(request, response, options, runtime);
+      const dialect = DIALECTS[path];
+      if (dialect && request.method === 'POST') {
+        return await handleCompletion(dialect, request, response, options, runtime);
       }
 
-      return json(
-        response,
+      const refused = openAiDialect.refuse(
         404,
-        errorBody(
-          `no route for ${request.method} ${path}`,
-          'invalid_request_error',
-          'not_found',
-          'This build serves /v1/chat/completions, /v1/models and /health.',
-        ),
-        cors,
+        'not_found',
+        `no route for ${request.method} ${path}`,
+        'This build serves /v1/chat/completions, /v1/messages, /v1/models and /health.',
       );
+      return sendJson(response, refused.status, refused.body, cors);
     } catch (error) {
       // Nothing reaches here in normal operation. If something does, the caller still
       // gets a shaped error rather than a socket that closes with no explanation.
       runtime.log(`gateway: unhandled ${String(error)}`);
       if (!response.headersSent) {
-        json(
-          response,
+        const refused = openAiDialect.refuse(
           500,
-          errorBody(
-            'the gateway failed in an unexpected way',
-            'api_error',
-            'internal',
-            'Check the gateway log. This is a bug worth reporting.',
-          ),
+          'api',
+          'the gateway failed in an unexpected way',
+          'Check the gateway log. This is a bug worth reporting.',
         );
+        sendJson(response, refused.status, refused.body);
       } else {
         response.end();
       }
@@ -161,6 +171,7 @@ function health(options: GatewayOptions, runtime: Runtime): unknown {
   return {
     status: 'ok',
     time: Math.floor(runtime.now() / 1000),
+    dialects: Object.keys(DIALECTS),
     providers: options.providers.map((provider) => ({
       id: provider.id,
       // Reported as declared. A provider never verified against the live service says
@@ -176,19 +187,39 @@ function health(options: GatewayOptions, runtime: Runtime): unknown {
   };
 }
 
+/**
+ * `/v1/models`, answered for both dialects at once.
+ *
+ * OpenAI and Anthropic both define this path and disagree about the field names. Each
+ * entry therefore carries both sets, and the envelope carries both envelopes. That is a
+ * superset rather than a fiction: every field says something true, and either client
+ * finds what it looks for instead of one of them getting a 404.
+ */
 function models(options: GatewayOptions, runtime: Runtime): unknown {
+  const created = Math.floor(runtime.now() / 1000);
+  const data = listModelIds(options.providers).map((id) => ({
+    id,
+    object: 'model',
+    type: 'model',
+    created,
+    created_at: new Date(created * 1000).toISOString(),
+    display_name: id,
+    owned_by: id.includes('/') ? id.slice(0, id.indexOf('/')) : 'omniproxy',
+  }));
+
   return {
     object: 'list',
-    data: listModelIds(options.providers).map((id) => ({
-      id,
-      object: 'model',
-      created: Math.floor(runtime.now() / 1000),
-      owned_by: id.includes('/') ? id.slice(0, id.indexOf('/')) : 'omniproxy',
-    })),
+    data,
+    has_more: false,
+    first_id: data[0]?.id ?? null,
+    last_id: data.at(-1)?.id ?? null,
   };
 }
 
-async function chatCompletions(
+/* ────────────────────────────── the shared request loop ────────────────────────────── */
+
+async function handleCompletion<T>(
+  dialect: DialectHooks<T>,
   request: IncomingMessage,
   response: ServerResponse,
   options: GatewayOptions,
@@ -199,127 +230,57 @@ async function chatCompletions(
     body = JSON.parse(await readBody(request));
   } catch (error) {
     const tooLarge = (error as Error).message === BODY_TOO_LARGE;
-    return json(
-      response,
-      tooLarge ? 413 : 400,
-      errorBody(
-        tooLarge ? 'the request body is too large' : 'the request body is not JSON',
-        'invalid_request_error',
-        'invalid_request',
-        tooLarge
-          ? `The gateway accepts up to ${MAX_BODY_BYTES / (1024 * 1024)}MB of conversation.`
-          : 'Send a JSON body with Content-Type: application/json.',
-      ),
-    );
-  }
-
-  let parsed: ChatCompletionRequest;
-  let route: Route;
-  try {
-    parsed = parseChatCompletionRequest(body);
-    route = resolveRoute(options.providers, parsed.model);
-  } catch (error) {
-    if (error instanceof OpenAiRequestError) {
-      return json(
-        response,
-        error.status,
-        errorBody(
-          error.message,
-          error.type,
+    const refused = tooLarge
+      ? dialect.refuse(
+          413,
+          'too_large',
+          'the request body is too large',
+          `The gateway accepts up to ${MAX_BODY_BYTES / (1024 * 1024)}MB of conversation.`,
+        )
+      : dialect.refuse(
+          400,
           'invalid_request',
-          'Check the request against the OpenAI Chat Completions schema.',
-          error.param ?? null,
-        ),
-      );
-    }
-    if (error instanceof RoutingError) {
-      return json(
-        response,
-        error.status,
-        errorBody(
-          error.message,
-          'invalid_request_error',
-          'model_not_found',
-          error.userAction,
-          'model',
-        ),
-      );
-    }
-    throw error;
+          'the request body is not JSON',
+          'Send a JSON body with Content-Type: application/json.',
+        );
+    return sendJson(response, refused.status, refused.body);
   }
 
-  const { prompt, systemPrompt } = flattenMessages(parsed.messages, parsed.tools);
-  const fullPrompt = systemPrompt === '' ? prompt : `${systemPrompt}\n\n${prompt}`;
-
-  if (fullPrompt.trim() === '') {
-    return json(
-      response,
-      400,
-      errorBody(
-        'the conversation flattened to an empty prompt',
-        'invalid_request_error',
-        'invalid_request',
-        'At least one message needs content a provider can be asked about.',
-        'messages',
-      ),
-    );
+  const planned = dialect.plan(body, options.providers);
+  if (planned.kind === 'refused') {
+    return sendJson(response, planned.status, planned.body, planned.headers ?? {});
   }
 
-  const opened = await openWithRetry(options, runtime, route, parsed, fullPrompt);
+  const opened = await openWithRetry(options, runtime, planned);
   if (opened.kind === 'failed') {
-    const shaped = toOpenAiError(opened.error);
-    return json(response, shaped.status, { error: shaped.error }, retryAfterHeader(opened.error));
+    const shaped = dialect.error(opened.error);
+    return sendJson(response, shaped.status, shaped.body, retryAfterHeader(opened.error));
   }
-
-  const identity = {
-    id: `chatcmpl-${runtime.uuid().replace(/-/g, '').slice(0, 24)}`,
-    created: Math.floor(runtime.now() / 1000),
-    model: parsed.model,
-  };
-  const shape = {
-    toolsOffered: (parsed.tools?.length ?? 0) > 0,
-    includeReasoning: route.alias.includes('reason') || route.alias.includes('think'),
-  };
 
   const account = opened.account;
+  let settled = false;
   const settle = (error?: OmniError): void => {
-    if (!account) return;
+    // Exactly once: a second call would double-count a success or rest an account twice.
+    if (!account || settled) return;
+    settled = true;
     if (error) options.accounts.fail(account.id, error);
     else options.accounts.succeed(account.id);
   };
 
   // The concurrency slot is held until the response is finished, streaming included.
-  // Giving it back at any earlier point would let a second request start while the
-  // first is still talking, which is precisely the limit the declaration states.
+  // Giving it back earlier would let a second request start while the first is still
+  // talking, which is precisely the limit the declaration states.
   try {
-    if (parsed.stream === true) {
-      return await streamResponse(response, opened.stream, identity, {
-        ...shape,
-        provider: route.provider.id,
-        log: runtime.log,
-        settle,
-      });
-    }
-
-    try {
-      const collected = await collectUms(opened.stream);
-      settle(collected.error);
-      if (collected.error) {
-        const shaped = toOpenAiError(collected.error);
-        return json(
-          response,
-          shaped.status,
-          { error: shaped.error },
-          retryAfterHeader(collected.error),
-        );
-      }
-      return json(response, 200, buildChatCompletion(identity, collected, shape, fullPrompt.length));
-    } catch (error) {
-      const omni = asOmniError(error, route.provider.id);
-      settle(omni);
-      const shaped = toOpenAiError(omni);
-      return json(response, shaped.status, { error: shaped.error }, retryAfterHeader(omni));
-    }
+    await dialect.respond({
+      plan: planned,
+      identity: dialect.identity(runtime.uuid),
+      events: opened.stream,
+      response,
+      settle,
+      promptChars: planned.prompt.length,
+      asOmniError,
+      log: runtime.log,
+    });
   } finally {
     opened.release?.();
   }
@@ -340,13 +301,12 @@ type Opened =
  * limit, exhausted quota) arrives exactly there. After it we stop: the message has been
  * spent, and the caller is owed the answer already being produced.
  */
-async function openWithRetry(
+async function openWithRetry<T>(
   options: GatewayOptions,
   runtime: Runtime,
-  route: Route,
-  parsed: ChatCompletionRequest,
-  fullPrompt: string,
+  plan: RequestPlan<T>,
 ): Promise<Opened> {
+  const route = plan.route;
   const needsAccount = route.provider.auth.kind !== 'none';
   const attempts = needsAccount ? Math.max(1, options.accounts.size(route.provider.id)) : 1;
   const tried = new Set<string>();
@@ -408,9 +368,8 @@ async function openWithRetry(
       ...(options.now ? { now: options.now } : {}),
       request: {
         model: route.alias,
-        prompt: fullPrompt,
-        messages: parsed.messages,
-        params: numericParams(parsed),
+        prompt: plan.prompt,
+        params: plan.params,
       },
     });
 
@@ -449,7 +408,7 @@ async function openWithRetry(
  * A refusal from the gate, in the shape a client can act on.
  *
  * `rate_limit` rather than `internal`, because that is what it is: the limit is the
- * provider's, we are simply the ones holding the line in front of it.
+ * provider's, and we are simply the ones holding the line in front of it.
  */
 function gateError(refused: GateRefused, route: Route): OmniError {
   return {
@@ -494,7 +453,6 @@ function noAccountError(
  * sees exactly the event sequence it would have seen had nothing peeked at it.
  */
 async function commit(events: AsyncGenerator<UMSEvent>, provider: string): Promise<Opened> {
-  // Same shape as `Opened`, minus the account and the slot the caller attaches.
   const head: UMSEvent[] = [];
   try {
     for (;;) {
@@ -531,96 +489,6 @@ async function closeQuietly(events: AsyncGenerator<UMSEvent>): Promise<void> {
   }
 }
 
-/* ─────────────────────────────────── streaming ─────────────────────────────────── */
-
-interface StreamContext {
-  toolsOffered: boolean;
-  includeReasoning: boolean;
-  provider: string;
-  log(line: string): void;
-  settle(error?: OmniError): void;
-}
-
-/**
- * Streams, and keeps streaming honestly when things go wrong.
- *
- * The moment the first byte is written the status is fixed at 200, so a later failure
- * cannot become a 500. It becomes a final chunk carrying the error and its action —
- * the difference between a client that reports "rate limited, try another account" and
- * one that reports a truncated response with no explanation.
- */
-async function streamResponse(
-  response: ServerResponse,
-  events: AsyncGenerator<UMSEvent>,
-  identity: { id: string; created: number; model: string },
-  context: StreamContext,
-): Promise<void> {
-  let failure: OmniError | undefined;
-  const guarded = guardStream(events, context.provider, (error) => {
-    failure = error;
-  });
-
-  let started = false;
-  try {
-    for await (const chunk of toOpenAiStream(guarded, identity, {
-      toolsOffered: context.toolsOffered,
-      includeReasoning: context.includeReasoning,
-    })) {
-      if (!started) {
-        started = true;
-        response.writeHead(200, {
-          'content-type': 'text/event-stream; charset=utf-8',
-          'cache-control': 'no-cache',
-          connection: 'keep-alive',
-          'x-accel-buffering': 'no',
-        });
-      }
-      // Back-pressure. Without it a fast provider fills memory when the client is slow,
-      // and the process dies with an allocation failure rather than a message.
-      if (!response.write(chunk)) {
-        await new Promise<void>((resolve) => response.once('drain', resolve));
-      }
-    }
-  } catch (error) {
-    failure = asOmniError(error, context.provider);
-    context.log(
-      `gateway: stream failed after ${started ? 'first byte' : 'nothing'}: ${String(error)}`,
-    );
-    if (!started) {
-      context.settle(failure);
-      const shaped = toOpenAiError(failure);
-      json(response, shaped.status, { error: shaped.error }, retryAfterHeader(failure));
-      return;
-    }
-  }
-
-  context.settle(failure);
-  response.end();
-}
-
-/**
- * Turns a thrown failure into a UMS error event, so the stream can carry it.
- *
- * Without this an exception mid-generator would abort the HTTP response with no body,
- * and every client in existence reports that as "the model stopped".
- */
-async function* guardStream(
-  events: AsyncGenerator<UMSEvent>,
-  provider: string,
-  onError: (error: OmniError) => void,
-): AsyncGenerator<UMSEvent> {
-  try {
-    for await (const event of events) {
-      if (event.type === 'error') onError(event.error);
-      yield event;
-    }
-  } catch (error) {
-    const omni = asOmniError(error, provider);
-    onError(omni);
-    yield { type: 'error', error: omni };
-  }
-}
-
 /* ──────────────────────────────────── plumbing ──────────────────────────────────── */
 
 export function asOmniError(error: unknown, provider: string): OmniError {
@@ -646,58 +514,37 @@ export function asOmniError(error: unknown, provider: string): OmniError {
   };
 }
 
-/** Numeric knobs a declaration may map onto provider fields. */
-export function numericParams(request: ChatCompletionRequest): Record<string, unknown> {
-  const params: Record<string, unknown> = {};
-  if (request.temperature !== undefined) params['temperature'] = request.temperature;
-  if (request.top_p !== undefined) params['topP'] = request.top_p;
-  const maxTokens = request.max_completion_tokens ?? request.max_tokens;
-  if (maxTokens !== undefined) params['maxTokens'] = maxTokens;
-  if (request.stop !== undefined) params['stop'] = request.stop;
-  return params;
-}
-
 function retryAfterHeader(error: OmniError): Record<string, string> {
   if (typeof error.retryAfterMs !== 'number') return {};
   return { 'retry-after': String(Math.max(1, Math.ceil(error.retryAfterMs / 1000))) };
 }
 
-function errorBody(
-  message: string,
-  type: string,
-  code: string,
-  action: string,
-  param: string | null = null,
-): unknown {
-  return { error: { message, type, code, param, action } };
-}
-
 /**
- * Constant-time comparison of the proxy's own key.
+ * Constant-time comparison of the proxy's own key. True means "refuse this request".
+ *
+ * Both header styles are accepted, because both clients exist: OpenAI SDKs send
+ * `Authorization: Bearer`, Anthropic SDKs send `x-api-key`. Refusing one of them would
+ * defeat half the point of serving two dialects.
  *
  * The key guards someone's accounts, and a length-leaking comparison is a five-minute
  * attack on a service that is, by design, reachable from the machine it runs on.
  */
-export function checkApiKey(
-  request: IncomingMessage,
-  expected: string | undefined,
-): unknown | undefined {
-  if (!expected) return undefined;
+export function needsApiKey(request: IncomingMessage, expected: string | undefined): boolean {
+  if (!expected) return false;
 
-  const header = request.headers['authorization'];
-  const presented = typeof header === 'string' ? header.replace(/^Bearer\s+/i, '') : '';
-  const a = Buffer.from(presented);
-  const b = Buffer.from(expected);
+  const authorization = request.headers['authorization'];
+  const apiKeyHeader = request.headers['x-api-key'];
+  const candidates = [
+    typeof authorization === 'string' ? authorization.replace(/^Bearer\s+/i, '') : '',
+    typeof apiKeyHeader === 'string' ? apiKeyHeader : '',
+  ];
 
-  if (a.length !== b.length || !timingSafeEqual(a, b)) {
-    return errorBody(
-      'invalid api key',
-      'authentication_error',
-      'invalid_api_key',
-      'Send the key the gateway was started with as Authorization: Bearer <key>.',
-    );
+  const wanted = Buffer.from(expected);
+  for (const candidate of candidates) {
+    const presented = Buffer.from(candidate);
+    if (presented.length === wanted.length && timingSafeEqual(presented, wanted)) return false;
   }
-  return undefined;
+  return true;
 }
 
 /**
@@ -719,7 +566,7 @@ export function corsHeaders(request: IncomingMessage): Record<string, string> {
   }
   return {
     'access-control-allow-origin': origin,
-    'access-control-allow-headers': 'authorization, content-type',
+    'access-control-allow-headers': 'authorization, content-type, x-api-key, anthropic-version',
     'access-control-allow-methods': 'GET, POST, OPTIONS',
     vary: 'origin',
   };
@@ -738,19 +585,4 @@ async function readBody(request: IncomingMessage): Promise<string> {
     chunks.push(chunk as Buffer);
   }
   return Buffer.concat(chunks).toString('utf8');
-}
-
-function json(
-  response: ServerResponse,
-  status: number,
-  payload: unknown,
-  headers: Record<string, string> = {},
-): void {
-  const body = JSON.stringify(payload);
-  response.writeHead(status, {
-    'content-type': 'application/json; charset=utf-8',
-    'content-length': Buffer.byteLength(body),
-    ...headers,
-  });
-  response.end(body);
 }

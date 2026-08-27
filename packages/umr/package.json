@@ -1,8 +1,8 @@
 {
-  "name": "@omniproxy/dialect-openai",
+  "name": "@omniproxy/umr",
   "version": "0.0.0",
   "private": true,
-  "description": "OpenAI-compatible surface built from UMR and UMS, and nothing else",
+  "description": "The universal request: one conversation shape every dialect converts into",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -15,9 +15,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@omniproxy/schema": "workspace:*",
-    "@omniproxy/umr": "workspace:*",
-    "zod": "^4.0.0"
+    "@omniproxy/schema": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

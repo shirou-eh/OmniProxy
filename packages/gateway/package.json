@@ -15,10 +15,12 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@omniproxy/dialect-anthropic": "workspace:*",
     "@omniproxy/dialect-openai": "workspace:*",
     "@omniproxy/engine-declarative": "workspace:*",
     "@omniproxy/schema": "workspace:*",
-    "@omniproxy/transport": "workspace:*"
+    "@omniproxy/transport": "workspace:*",
+    "@omniproxy/umr": "workspace:*"
   },
   "devDependencies": {
     "@omniproxy/provider-sim": "workspace:*",
