@@ -47,7 +47,7 @@ export function parseDeclaration(text: string, options: LoadOptions = {}): Provi
     throw error;
   }
 
-  if (raw === null || typeof raw !== 'object') {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
     throw new DeclarationError(
       `${source} is empty or is not a mapping`,
       'A declaration is a YAML mapping starting with schemaVersion: 1.',

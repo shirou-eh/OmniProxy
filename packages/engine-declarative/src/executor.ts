@@ -105,9 +105,11 @@ export async function* executeFlow(options: ExecuteOptions): AsyncGenerator<UMSE
     if (!shouldRun(step, context())) return;
 
     const request = buildRequest(step.request, channel, declaration, context(), label);
-    const response = await options.http.request({ ...request, signal: options.signal });
-
+    // Before the request, not after: a declaration can come from a stranger, and a
+    // host check that runs once the cookies are already on the wire checks nothing.
     assertAllowedHost(declaration, channel, request.url, label);
+
+    const response = await options.http.request({ ...request, signal: options.signal });
     throwOnErrorRules(declaration, response.status, response.body, label);
 
     if (step.extract) {
@@ -563,11 +565,23 @@ async function* emitNonStreamed(
   context: () => TemplateContext,
 ): AsyncGenerator<UMSEvent> {
   const parsed = parseJson(body, 'flow.send');
-  const map = step.stream?.map;
+  const map = step.response ?? step.stream?.map;
 
   if (map?.text) {
     const text = selectJsonPath(parsed, map.text);
     if (typeof text === 'string') yield { type: 'text.delta', text };
+  }
+  if (map?.reasoning) {
+    const reasoning = selectJsonPath(parsed, map.reasoning);
+    if (typeof reasoning === 'string' && reasoning !== '') {
+      yield { type: 'reasoning.delta', text: reasoning };
+    }
+  }
+  if (map?.usage) {
+    const usage = selectJsonPath(parsed, map.usage);
+    if (usage !== undefined && usage !== null) {
+      yield { type: 'usage', usage: { estimated: true, ...(usage as object) } };
+    }
   }
   if (map?.messageId) {
     const id = selectJsonPath(parsed, map.messageId);

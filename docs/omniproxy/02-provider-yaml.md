@@ -20,7 +20,23 @@
 | `job.*` | в async-потоке: `job.externalId`, `job.attempt` |
 
 Модификаторы через вертикальную черту: `json`, `base64`, `base64url`, `urlencode`,
-`int`, `bool`, `default:<value>`, `slice:<n>`. Список закрыт, расширяется только кодом.
+`int`, `number`, `bool`, `upper`, `lower`, `trim`, `null-if-empty`,
+`default:<value>`, `slice:<n>`. Список закрыт, расширяется только кодом.
+
+**Отсутствующее значение по умолчанию — ошибка.** Плейсхолдер, который ни во что не
+развернулся, останавливает сборку запроса и называет себя по имени: запрос с пустым
+`sessionId` уходит наверх и возвращается безликим 400, на разбор которого уходит час.
+
+Но часть значений отсутствует законно — `parent_message_id` первого сообщения в
+диалоге, — поэтому отсутствие должно быть *сказано*, а не просто пережито:
+
+| Запись | Если значения нет |
+|---|---|
+| `{{state.parentMessageId}}` | запрос не собирается, плейсхолдер назван в ошибке |
+| `{{state.parentMessageId?}}` | поле выбрасывается из тела целиком |
+| `{{state.parentMessageId\|null-if-empty}}` | поле уходит как JSON `null` |
+
+Третья форма — то, что нужно DeepSeek: сервер ждёт поле, но пустым его не принимает.
 
 **Извлечение** — подмножество JSONPath: `$.a.b`, `$.a[0]`, `$.a[*].b`, `$..id`,
 фильтр по равенству поля. Ничего исполняемого. Для не-JSON тел доступны `regex:`
@@ -129,7 +145,7 @@ flow:
       json:
         stream: true
         model: "{{req.model}}"
-        parent_id: "{{state.parentMessageId}}"
+        parent_id: "{{state.parentMessageId|null-if-empty}}"
         messages: [{ role: user, content: "{{req.prompt}}" }]
     stream:
       format: sse                 # sse | ndjson | json-patch | websocket | poll | plain
@@ -146,6 +162,12 @@ flow:
       #   opField: o
       #   valueField: v
       #   routes: { RESPONSE: text, THINK: reasoning, SEARCH: search }
+    # Провайдер, который отвечает одним телом, а не потоком, вместо `stream`
+    # описывает `response` — те же поля карты. Без этого один-единственный
+    # нестримящий сервис пришлось бы писать кодовым адаптером ради двух JSONPath.
+    # response:
+    #   text:   $.data.text
+    #   finish: $.data.status
     persist: { parentMessageId: "{{extracted.messageId}}" }
 
   # --- Асинхронный путь (видео/музыка/3D) ---

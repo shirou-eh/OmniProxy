@@ -9,6 +9,16 @@
  * A template that resolves to nothing is not silently empty: it is reported, because
  * an upstream call built from a missing session id fails in a way that takes an hour
  * to understand, while "unresolved {{state.sessionId}}" takes a second.
+ *
+ * Some values are legitimately absent, though — `parent_message_id` on the first
+ * message of a conversation is the canonical case — so absence has to be sayable
+ * rather than merely suffered. Two ways to say it, both data:
+ *
+ *   `{{state.parentMessageId?}}`               absent -> the field is omitted
+ *   `{{state.parentMessageId|null-if-empty}}`  absent -> the field is JSON null
+ *
+ * Anything without one of those is still reported. Optional by accident is how a
+ * request goes out with an empty session id and comes back with a generic 400.
  */
 
 export interface TemplateContext {
@@ -60,9 +70,9 @@ export function renderTemplate(template: string, context: TemplateContext): Rend
   const unresolved: string[] = [];
 
   const value = template.replace(PLACEHOLDER, (_match, expression: string) => {
-    const resolved = resolveExpression(expression, context, template);
+    const { value: resolved, optional } = resolveExpression(expression, context, template);
     if (resolved === undefined || resolved === null) {
-      unresolved.push(expression.trim());
+      if (!optional) unresolved.push(expression.trim());
       return '';
     }
     return typeof resolved === 'string' ? resolved : stringify(resolved);
@@ -86,12 +96,13 @@ export function renderValue(input: unknown, context: TemplateContext): {
     if (typeof node === 'string') {
       const whole = /^\{\{([^{}]+)\}\}$/.exec(node);
       if (whole) {
-        const resolved = resolveExpression(whole[1] as string, context, node);
-        if (resolved === undefined) {
-          unresolved.push((whole[1] as string).trim());
+        const { value, optional } = resolveExpression(whole[1] as string, context, node);
+        if (value === undefined) {
+          if (!optional) unresolved.push((whole[1] as string).trim());
           return undefined;
         }
-        return resolved;
+        // `null` survives: a provider that wants an explicit null gets one.
+        return value;
       }
       const rendered = renderTemplate(node, context);
       unresolved.push(...rendered.unresolved);
@@ -117,21 +128,39 @@ export function renderValue(input: unknown, context: TemplateContext): {
   return { value: walk(input), unresolved };
 }
 
+interface Resolved {
+  value: unknown;
+  /** The author said this may be absent, so absence is not worth reporting. */
+  optional: boolean;
+}
+
 function resolveExpression(
   expression: string,
   context: TemplateContext,
   template: string,
-): unknown {
-  const [pathPart, ...modifierParts] = expression.split('|').map((part) => part.trim());
-  if (!pathPart) throw new TemplateError('empty placeholder', template, 'Remove the empty {{}}.');
+): Resolved {
+  const [rawPath, ...modifierParts] = expression.split('|').map((part) => part.trim());
+  if (!rawPath) throw new TemplateError('empty placeholder', template, 'Remove the empty {{}}.');
+
+  let optional = false;
+  let pathPart = rawPath;
+  if (pathPart.endsWith('?')) {
+    optional = true;
+    pathPart = pathPart.slice(0, -1).trim();
+  }
 
   let value = readPath(pathPart, context, template);
 
   for (const modifier of modifierParts) {
+    if (modifier === 'null-if-empty') {
+      optional = true;
+      value = value === undefined || value === null || value === '' ? null : value;
+      continue;
+    }
     value = applyModifier(modifier, value, template);
   }
 
-  return value;
+  return { value, optional };
 }
 
 function readPath(path: string, context: TemplateContext, template: string): unknown {
@@ -216,7 +245,7 @@ function applyModifier(modifier: string, value: unknown, template: string): unkn
       throw new TemplateError(
         `unknown template modifier "${modifier}"`,
         template,
-        'Supported: json, base64, base64url, urlencode, int, number, bool, upper, lower, trim, default:<value>, slice:<n>.',
+        'Supported: json, base64, base64url, urlencode, int, number, bool, upper, lower, trim, null-if-empty, default:<value>, slice:<n>.',
       );
   }
 }

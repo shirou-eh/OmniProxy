@@ -340,6 +340,14 @@ class JsonPatchFramer implements Framer {
         if (value !== null) events.push({ kind: 'finish', reason: String(value) });
         break;
 
+      case 'response/status':
+        // A status that is not FINISHED is the upstream telling us why it stopped —
+        // it is the only signal for a filtered or aborted response on this provider.
+        if (value !== 'FINISHED' && value !== null) {
+          events.push({ kind: 'finish', reason: String(value) });
+        }
+        break;
+
       default:
         break;
     }

@@ -295,6 +295,12 @@ export const stepSchema = z.strictObject({
   extract: z.record(z.string(), jsonPathSchema).optional(),
   persist: z.record(z.string(), z.string()).optional(),
   stream: streamSpecSchema.optional(),
+  /**
+   * How to read a whole-body answer, for providers that do not stream. Without it a
+   * one-shot provider would have to be written as a code adapter for want of two
+   * JSONPaths — which is exactly the outcome this engine exists to avoid.
+   */
+  response: streamMapSchema.optional(),
   pollAfterMs: z.number().int().nonnegative().optional(),
 });
 
