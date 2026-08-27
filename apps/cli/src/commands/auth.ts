@@ -156,9 +156,31 @@ export async function runAuthAdd(argv: readonly string[], io: CliIo): Promise<nu
     return EXIT_USAGE;
   }
   if (Object.keys(fields).length === 0) {
-    io.err('omniproxy: auth add needs at least one --field K=V');
-    io.err('Example: omniproxy auth add deepseek-web --field token=...');
-    return EXIT_USAGE;
+    // Interactive fallback for humans at a TTY: ask for the one field that
+    // every provider has today (`token`). This keeps `auth add` copy-pasteable
+    // for scripts (`--field`) but also "type and forget" for a person who just
+    // ran `omniproxy auth add deepseek-web`.
+    if (process.stdin.isTTY && process.stdout.isTTY) {
+      try {
+        const { createInterface } = await import('node:readline');
+        const rl = createInterface({ input: process.stdin, output: process.stdout });
+        const ask = (q: string): Promise<string> =>
+          new Promise((resolve) => rl.question(q, resolve));
+        io.out(`No --field given — enter the credential for ${provider}.`);
+        io.out(`For deepseek-web this is the 'token' from localStorage.userToken.value`);
+        const answer = (await ask('token: ')).trim();
+        rl.close();
+        if (answer) fields['token'] = answer;
+      } catch {
+        // fall through to the usage error below
+      }
+    }
+    if (Object.keys(fields).length === 0) {
+      io.err('omniproxy: auth add needs at least one --field K=V');
+      io.err('Example: omniproxy auth add deepseek-web --field token=...');
+      io.err('Or run interactively: omniproxy auth add deepseek-web  (then paste token)');
+      return EXIT_USAGE;
+    }
   }
   const id = parsed.values.id as string | undefined;
   const file = parsed.values.file as string | undefined;

@@ -20,6 +20,7 @@ import {
   runAuthPath,
   runAuthRemove,
 } from './commands/auth.js';
+import { runDoctor } from './commands/doctor.js';
 import { EXIT_OK, EXIT_USAGE, type CliIo } from './io.js';
 
 /**
@@ -43,6 +44,8 @@ Usage:
   omniproxy auth remove <provider> [--id <id>]
   omniproxy auth path
 
+  omniproxy doctor [--json] [--anonymized]
+
   omniproxy capture record <provider-id> --auth <file.json> [--prompt <text>] [--model <alias>] [--scenario <name>] [--out <dir>] [--env K=V]
   omniproxy capture import <file.har> --provider <id> --scenario <name> [--out <dir>]
   omniproxy capture sanitize <bundle.json> [--out <path>]
@@ -51,7 +54,7 @@ Usage:
 Run a command with --help for its options.
 
 Gateway: OpenAI / Anthropic / Gemini / Ollama — four dialects, plus your own via --dialect.
-Under construction: browser-based recorder, probe/doctor, job/media.
+Under construction: browser-based recorder, probe, job/media.
 See docs/omniproxy/04-phase-1-plan.md for what lands next.`;
 
 const CAPTURE_USAGE = `omniproxy capture — record and prepare provider traffic
@@ -85,7 +88,7 @@ The store is a JSON file: { "deepseek-web": { "token": "…" } } or a pool
 It is created 0600 (owner-only) and never logged. Delete it with
 \`rm ~/.omniproxy/accounts.json\` (or OMNIPROXY_HOME/accounts.json).`;
 
-export const VERSION_LINE = 'omniproxy 0.1.3 (gateway: openai/anthropic/gemini/ollama + pluggable dialects + auth store + capabilities)';
+export const VERSION_LINE = 'omniproxy 0.1.4 (gateway: openai/anthropic/gemini/ollama + pluggable dialects + auth store + capabilities + doctor)';
 
 export async function run(argv: readonly string[], io: CliIo): Promise<number> {
   const [group, command, ...rest] = argv;
@@ -183,6 +186,10 @@ export async function run(argv: readonly string[], io: CliIo): Promise<number> {
     io.err(`omniproxy: unknown auth command "${command}"`);
     io.err(AUTH_USAGE);
     return EXIT_USAGE;
+  }
+
+  if (group === 'doctor') {
+    return runDoctor(command === undefined ? [] : [command, ...rest], io);
   }
 
   io.err(`omniproxy: unknown command "${group}"`);

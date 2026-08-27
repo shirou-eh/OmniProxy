@@ -1,6 +1,6 @@
 {
   "name": "@omniproxy/transport",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": true,
   "description": "HTTP clients for the engine: a real one, a recording one, a replaying one",
   "license": "MIT",

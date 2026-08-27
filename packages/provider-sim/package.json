@@ -1,6 +1,6 @@
 {
   "name": "@omniproxy/provider-sim",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": true,
   "description": "Protocol-faithful local simulators of provider web APIs, for recording and CI",
   "license": "MIT",

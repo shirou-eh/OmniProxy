@@ -89,6 +89,29 @@ working example, is [`docs/omniproxy/07-writing-a-dialect.md`](docs/omniproxy/07
 Note that a dialect file is code and runs with the gateway's accounts: nothing is ever
 loaded implicitly, only paths you name on the command line.
 
+**Set and forget (Docker, one command).** Credentials are `0600` in a volume, the
+gateway restarts on failure, and `doctor` tells you what is wrong without leaking
+secrets.
+
+```bash
+# 1. Store a credential once (interactive prompt if you omit --field)
+pnpm run build && node apps/cli/dist/main.js auth add deepseek-web --field token=...
+# where it lives / how to delete:
+node apps/cli/dist/main.js auth path      # → ~/.omniproxy/accounts.json
+# rm ~/.omniproxy/accounts.json  — or: omniproxy auth remove deepseek-web
+
+# 2. Run — restarts unless stopped, healthcheck on /health
+docker compose up -d && docker compose logs -f
+# or without compose:
+docker build -f Containerfile -t omniproxy:0.1.3 . && \
+docker run -d --restart unless-stopped -p 127.0.0.1:8787:8787 \
+  -v omniproxy_data:/home/omniproxy/.omniproxy omniproxy:0.1.3
+
+# 3. Diagnose (no secrets printed, --anonymized for bug reports)
+node apps/cli/dist/main.js doctor
+node apps/cli/dist/main.js doctor --json | jq
+```
+
 **The capture pipeline and engine.** A provider is described by a `provider.yaml` and
 executed by generic code — no adapter is written from a guess, only from recorded
 traffic (§12.1).
@@ -100,6 +123,7 @@ omniproxy capture record deepseek-web --auth ./auth.json
 omniproxy capture sanitize <bundle>        # then, and only then, share it
 omniproxy capture analyze <bundle>         # what each call does, and how values flow
 omniproxy provider draft <bundle>          # a provider.yaml draft, TODOs and all
+omniproxy doctor --anonymized              # what was found, where the store lives, 0600?
 ```
 
 `providers/deepseek-web/provider.yaml` is the first real declaration. Its status is

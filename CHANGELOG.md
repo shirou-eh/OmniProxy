@@ -76,7 +76,20 @@ Blockers for a truly runnable gateway (found by `git add .` and `docker run` out
   Никаких выдуманных `size`/`contextChars` — только то, что в декларации.
   404 теперь подсказывает `.../v1/capabilities and /health`.
 
+## [0.1.4] — 2026-08-27
+
+**Set and forget.**
+
+- `omniproxy doctor [--json] [--anonymized]` — `node - doctor`, providers
+  (shadowing, broken), store path/0600/valid JSON, no secrets in output
+  (for bug reports). `auth add` now prompts for `token` when run
+  interactively without `--field`.
+- `docker-compose.yml` — `docker compose up -d` with `restart: unless-stopped`,
+  `healthcheck` on `/health`, volume `omniproxy_data` for `0600` store.
+  `README` “Set and forget (Docker, one command)” copy-paste.
+
 [0.1.0]: https://github.com/shirou-eh/OmniProxy/releases/tag/v0.1.0
 [0.1.1]: https://github.com/shirou-eh/OmniProxy/releases/tag/v0.1.1
 [0.1.2]: https://github.com/shirou-eh/OmniProxy/releases/tag/v0.1.2
 [0.1.3]: https://github.com/shirou-eh/OmniProxy/releases/tag/v0.1.3
+[0.1.4]: https://github.com/shirou-eh/OmniProxy/releases/tag/v0.1.4

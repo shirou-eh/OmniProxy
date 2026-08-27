@@ -1,6 +1,6 @@
 {
   "name": "@omniproxy/gateway",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": true,
   "description": "The HTTP gateway: standard dialects in front of provider web interfaces",
   "license": "MIT",

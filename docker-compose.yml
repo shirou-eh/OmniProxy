@@ -1,0 +1,51 @@
+# OmniProxy — set and forget
+# One command, restart on failure, credentials on a 0600 volume.
+#
+# 1. Put your token in the store *once* on the host:
+#      pnpm run build && node apps/cli/dist/main.js auth add deepseek-web --field token=...
+#    or inside the container (see below).
+#
+# 2. Start:
+#      docker compose up -d
+#    Logs:
+#      docker compose logs -f
+#    Stop:
+#      docker compose down
+#
+# The gateway listens on 8787 and is reachable as http://127.0.0.1:8787
+# from the host. If you expose it beyond loopback, set OMNIPROXY_API_KEY
+# (or --api-key) — the gateway refuses 0.0.0.0 without a key.
+#
+# For a second provider, just add another `auth add` and restart:
+#   docker compose exec omniproxy node apps/cli/dist/main.js auth add qwen-web --field token=...
+#   docker compose restart omniproxy
+services:
+  omniproxy:
+    build:
+      context: .
+      dockerfile: Containerfile
+    image: omniproxy:0.1.3
+    container_name: omniproxy
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8787:8787"
+    environment:
+      # 0.0.0.0 inside the container, 127.0.0.1 on the host via the port mapping above.
+      HOST: "0.0.0.0"
+      PORT: "8787"
+      # Uncomment and set a long random value if you ever bind beyond loopback:
+      # OMNIPROXY_API_KEY: "change-me-to-a-long-random-string"
+    volumes:
+      # Credentials and any user providers you drop into ~/.omniproxy live here.
+      # 0600 inside the container, 0700 for the directory — never committed.
+      - omniproxy_data:/home/omniproxy/.omniproxy
+    healthcheck:
+      test: ["CMD", "node", "-e", "const http=require('http');const req=http.get({host:'127.0.0.1',port:process.env.PORT||8787,path:'/health'},res=>{res.resume();process.exit(res.statusCode===200?0:1)});req.on('error',()=>process.exit(1));req.setTimeout(4000,()=>{req.destroy();process.exit(1)})"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+volumes:
+  omniproxy_data:
+    name: omniproxy_data
