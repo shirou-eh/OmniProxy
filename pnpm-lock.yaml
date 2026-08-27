@@ -80,12 +80,49 @@ importers:
         specifier: ^3.0.0
         version: 3.2.7(@types/node@22.20.1)(yaml@2.9.0)
 
+  packages/provider-sim:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.0
+        version: 22.20.1
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.7(@types/node@22.20.1)(yaml@2.9.0)
+
   packages/schema:
     dependencies:
       zod:
         specifier: ^4.0.0
         version: 4.4.3
     devDependencies:
+      '@types/node':
+        specifier: ^22.10.0
+        version: 22.20.1
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.7(@types/node@22.20.1)(yaml@2.9.0)
+
+  packages/transport:
+    dependencies:
+      '@omniproxy/capture':
+        specifier: workspace:*
+        version: link:../capture
+      '@omniproxy/engine-declarative':
+        specifier: workspace:*
+        version: link:../engine-declarative
+      '@omniproxy/schema':
+        specifier: workspace:*
+        version: link:../schema
+    devDependencies:
+      '@omniproxy/provider-sim':
+        specifier: workspace:*
+        version: link:../provider-sim
       '@types/node':
         specifier: ^22.10.0
         version: 22.20.1

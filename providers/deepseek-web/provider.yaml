@@ -1,0 +1,218 @@
+schemaVersion: 1
+id: deepseek-web
+displayName: DeepSeek (web chat)
+class: A
+# `unverified`, not `experimental`, and certainly not `stable`.
+#
+# Every shape below is taken from legacy/server.js — a client that has worked against
+# the live service — so nothing here is invented (§12.1). But "derived from a working
+# client" is not the same as "recorded from the service": the endpoints, the envelopes
+# and the stream shapes have been *executed* end to end only against the local
+# simulator in packages/provider-sim. That closes the pipeline question, not the
+# freshness question. This status changes when someone runs `omniproxy capture record`
+# against chat.deepseek.com with their own account and the diff comes back empty.
+status: unverified
+homepage: https://chat.deepseek.com
+
+capture:
+  # No bundle from the live service yet. See docs/providers/deepseek-web.md.
+  method: cdp
+  coverage: []
+
+allowedHosts:
+  # The proof-of-work module is served from a separate static host.
+  - fe-static.deepseek.com
+
+channels:
+  - id: web
+    kind: web-http
+    base: https://chat.deepseek.com
+    fingerprint:
+      profile: chrome-131
+      impersonate: false
+      headerOrder:
+        - accept
+        - content-type
+        - origin
+        - referer
+        - user-agent
+        - authorization
+        - x-ds-pow-response
+      static:
+        accept: '*/*'
+        accept-language: en-US,en;q=0.9
+        origin: https://chat.deepseek.com
+        referer: https://chat.deepseek.com/
+        x-app-version: '20241129.1'
+        x-client-locale: en_US
+        x-client-platform: web
+        x-client-version: '1.0.0-always'
+    http2: true
+    concurrency: 1
+
+auth:
+  kind: bearer
+  harvest:
+    domains: [chat.deepseek.com, .deepseek.com]
+    cookies:
+      optional: [cf_clearance, HWWAFSESID, HWWAFSESTIME]
+    localStorage:
+      required: [userToken]
+    extract:
+      token: $.userToken.value
+    afterLogin:
+      instruction: >-
+        Send one short message in the chat, then come back to the terminal. The token
+        is only written to localStorage after the first successful request.
+  present:
+    headers:
+      authorization: Bearer {{auth.token}}
+  quota:
+    unit: message
+
+antibot:
+  challenges: [pow-wasm]
+  detect:
+    - match: { status: 403, bodyContains: 'Just a moment' }
+      as: challenge
+      escalate: browser
+    - match: { status: 429 }
+      as: rate_limit
+      cooldownFrom: header:retry-after
+
+vars:
+  # Level 2 of ADR-0002: the declaration names the transform, the code does the work.
+  # The challenge has to be extracted before this runs, which is why flow.prepare
+  # exists at all — see the ordering note in the executor.
+  pow:
+    transform: deepseek-pow-v0
+    with:
+      challenge: '{{extracted.challenge}}'
+      wasmUrl: '{{env.DEEPSEEK_WASM_URL|default:https://fe-static.deepseek.com/chat/static/sha3_wasm_bg.7b9ca65ddd.wasm}}'
+      targetPath: /api/v0/chat/completion
+
+flow:
+  prepare:
+    - request:
+        method: POST
+        path: /api/v0/chat/create_pow_challenge
+        json:
+          target_path: /api/v0/chat/completion
+      extract:
+        challenge: $.data.biz_data.challenge
+
+  createSession:
+    unless: '{{state.sessionId}}'
+    request:
+      method: POST
+      path: /api/v0/chat_session/create
+      json: {}
+    extract:
+      # The service answers with both; legacy reads chat_session.id first and falls
+      # back to biz_data.id, so the declaration reads the one that is always present.
+      sessionId: $.data.biz_data.chat_session.id
+    persist:
+      sessionId: '{{extracted.sessionId}}'
+
+  send:
+    request:
+      method: POST
+      path: /api/v0/chat/completion
+      headers:
+        x-ds-pow-response: '{{vars.pow}}'
+      json:
+        chat_session_id: '{{state.sessionId}}'
+        # Absent on the first message of a conversation, and the field must still be
+        # sent — hence null-if-empty rather than a plain placeholder.
+        parent_message_id: '{{state.parentMessageId|null-if-empty}}'
+        prompt: '{{req.prompt}}'
+        ref_file_ids: []
+        thinking_enabled: false
+        search_enabled: false
+        action: null
+        preempt: false
+    stream:
+      format: json-patch
+      doneWhen:
+        data: '[DONE]'
+      patch:
+        pathField: p
+        opField: o
+        valueField: v
+        typeField: type
+        routes:
+          RESPONSE: text
+          SEARCH: text
+          THINK: reasoning
+          REASONING: reasoning
+
+errors:
+  - match: { status: 401 }
+    as: auth_expired
+    retryable: no
+    userMessage: >-
+      The DeepSeek session has expired. Run `omniproxy auth add deepseek-web` and sign
+      in again; the token in localStorage is short-lived.
+  - match: { status: 403, bodyContains: 'Just a moment' }
+    as: challenge
+    retryable: same-account
+    userMessage: >-
+      Cloudflare is challenging this request. The HTTP channel cannot answer it; open
+      the site in a browser once, then retry.
+  - match: { status: 403 }
+    as: challenge
+    retryable: same-account
+    userMessage: >-
+      The proof-of-work header was rejected. Usually the challenge expired — retrying
+      mints a fresh one. If it repeats, the WASM module has changed and the capture
+      needs re-recording.
+  - match: { status: 429 }
+    as: rate_limit
+    retryable: other-account
+  - match: { status: 404 }
+    as: upstream_unavailable
+    retryable: same-account
+    userMessage: >-
+      The chat session is gone. Clear it and a new one is created on the next request.
+  - match: { status: 200, jsonPath: $.code, equals: 40303 }
+    as: quota_exhausted
+    retryable: other-account
+    userMessage: >-
+      This account has hit its message limit. Add another with
+      `omniproxy auth add deepseek-web`, or wait for the daily reset.
+
+models:
+  - alias: deepseek-chat
+    native: deepseek_chat
+    modality:
+      input: [text]
+      output: [text]
+  - alias: deepseek-reasoner
+    native: deepseek_chat
+    modality:
+      input: [text]
+      output: [text]
+    extra:
+      thinking_enabled: true
+  - alias: deepseek-search
+    native: deepseek_chat
+    extra:
+      search_enabled: true
+
+context:
+  strategy: flatten-to-prompt
+  compaction: truncate-middle
+  # No `measured` block on purpose: the context budget has not been measured against
+  # the live service, and a number written here would be a guess wearing a fact's
+  # clothes. The loader warns about its absence, which is the correct amount of noise.
+
+probe:
+  interval: 30m
+  request:
+    prompt: Reply with the single word OK.
+  expect:
+    contains: OK
+    maxFirstByteMs: 15000
+  onFail:
+    after: 2
+    action: quarantine

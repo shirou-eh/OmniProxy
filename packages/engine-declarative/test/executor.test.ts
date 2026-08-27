@@ -1,5 +1,5 @@
 import type { ProviderDeclaration, UMSEvent } from '@omniproxy/schema';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import {
   buildRequest,
   DeclarationExecutionError,
@@ -11,7 +11,7 @@ import {
 } from '../src/executor.js';
 import { parseDeclaration } from '../src/loader.js';
 import { memoryStateStore, type HttpClient, type HttpRequest } from '../src/ports.js';
-import { TransformRegistry, type TransformContext } from '../src/transforms.js';
+import { clearWasmCache, TransformRegistry, type TransformContext } from '../src/transforms.js';
 import { deepseekYaml, minimalYaml, nonStreamedYaml } from './fixtures.js';
 
 /* ─────────────────────────────── the test doubles ─────────────────────────────── */
@@ -124,14 +124,31 @@ function textOf(events: UMSEvent[]): string {
     .join('');
 }
 
-/** The three replies a successful DeepSeek turn needs: challenge, session, stream. */
+/**
+ * The four replies a successful DeepSeek turn needs.
+ *
+ * Four, not three: the proof-of-work module is downloaded through the engine's own
+ * HTTP client, so it is part of the flow like everything else. It sits after the
+ * session create because transforms run after the steps that feed them.
+ */
 function happyPath(chunks: string[]): Reply[] {
   return [
     { body: JSON.stringify({ data: { biz_data: { challenge: challengeBody } } }) },
     { body: JSON.stringify({ data: { biz_data: { id: 'sess-42' } } }) },
+    { chunks: [WASM_BYTES] },
     { chunks },
   ];
 }
+
+/** Stand-in for the module bytes; the injected instantiateWasm never looks at them. */
+const WASM_BYTES = 'wasm-module-bytes';
+
+beforeEach(() => {
+  // The module cache is keyed by URL and lives for the process. Leaving it warm would
+  // let the first test's download satisfy every later one, and the flow would appear
+  // to make one request fewer than it does.
+  clearWasmCache();
+});
 
 const challengeBody = {
   algorithm: 'DeepSeekHashV1',
@@ -158,6 +175,7 @@ describe('executeFlow', () => {
     expect(sent.map((request) => new URL(request.url).pathname)).toEqual([
       '/api/v0/chat/create_pow_challenge',
       '/api/v0/chat_session/create',
+      '/static/sha3_wasm_bg.wasm',
       '/api/v0/chat/completion',
     ]);
     expect(events[0]).toEqual({
@@ -174,7 +192,7 @@ describe('executeFlow', () => {
     // The proof of work needs the challenge, so it cannot be computed before it
     // arrives. Getting this order wrong produces a header the server rejects.
     const { sent } = await run(happyPath(answerStream));
-    const header = sent[2]!.headers['x-ds-pow-response']!;
+    const header = sent[3]!.headers['x-ds-pow-response']!;
     expect(JSON.parse(Buffer.from(header, 'base64').toString('utf8'))).toMatchObject({
       challenge: 'ch',
       answer: 4242,
@@ -184,7 +202,7 @@ describe('executeFlow', () => {
 
   it('sends the auth header, the fingerprint headers and the step headers together', async () => {
     const { sent } = await run(happyPath(answerStream));
-    expect(sent[2]!.headers).toMatchObject({
+    expect(sent[3]!.headers).toMatchObject({
       authorization: 'Bearer tok-1',
       'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
       'x-client-locale': 'en_US',
@@ -196,12 +214,33 @@ describe('executeFlow', () => {
     const first = await run(happyPath(answerStream));
     expect(first.state.get()['sessionId']).toBe('sess-42');
 
+    // This test is about session reuse, not about the module cache.
+    clearWasmCache();
     const second = await run(
-      [{ body: JSON.stringify({ data: { biz_data: { challenge: challengeBody } } }) }, { chunks: answerStream }],
+      [
+        { body: JSON.stringify({ data: { biz_data: { challenge: challengeBody } } }) },
+        { chunks: [WASM_BYTES] },
+        { chunks: answerStream },
+      ],
       { state: { sessionId: 'sess-42' } },
     );
     expect(second.sent.map((request) => new URL(request.url).pathname)).toEqual([
       '/api/v0/chat/create_pow_challenge',
+      '/static/sha3_wasm_bg.wasm',
+      '/api/v0/chat/completion',
+    ]);
+  });
+
+  it('downloads the proof-of-work module once per process, not once per request', async () => {
+    await run(happyPath(answerStream));
+    const second = await run([
+      { body: JSON.stringify({ data: { biz_data: { challenge: challengeBody } } }) },
+      { body: JSON.stringify({ data: { biz_data: { id: 'sess-43' } } }) },
+      { chunks: answerStream },
+    ]);
+    expect(second.sent.map((request) => new URL(request.url).pathname)).toEqual([
+      '/api/v0/chat/create_pow_challenge',
+      '/api/v0/chat_session/create',
       '/api/v0/chat/completion',
     ]);
   });
@@ -217,7 +256,7 @@ describe('executeFlow', () => {
 
   it('sends the body the declaration describes', async () => {
     const { sent } = await run(happyPath(answerStream), { state: { parentMessageId: 5 } });
-    expect(JSON.parse(sent[2]!.body!)).toEqual({
+    expect(JSON.parse(sent[3]!.body!)).toEqual({
       chat_session_id: 'sess-42',
       parent_message_id: 5,
       prompt: 'привет',
@@ -229,14 +268,14 @@ describe('executeFlow', () => {
     // The first message of a conversation has no parent. Refusing to build the
     // request would be wrong, and so would sending an empty string.
     const { sent } = await run(happyPath(answerStream));
-    expect(JSON.parse(sent[2]!.body!).parent_message_id).toBeNull();
+    expect(JSON.parse(sent[3]!.body!).parent_message_id).toBeNull();
   });
 
   it("merges a model's extra fields into the send body", async () => {
     const { sent } = await run(happyPath(answerStream), {
       request: { model: 'deepseek-reasoner' },
     });
-    expect(JSON.parse(sent[2]!.body!)).toMatchObject({ thinking_enabled: true });
+    expect(JSON.parse(sent[3]!.body!)).toMatchObject({ thinking_enabled: true });
   });
 
   it('reassembles multi-byte text split across transport chunks', async () => {
@@ -353,6 +392,7 @@ describe('what happens when something is wrong', () => {
       run([
         { body: JSON.stringify({ data: { biz_data: { challenge: challengeBody } } }) },
         { body: JSON.stringify({ data: { biz_data: { id: 's' } } }) },
+        { chunks: [WASM_BYTES] },
         { status: 429, chunks: ['too many'] },
       ]),
     );

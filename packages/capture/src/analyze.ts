@@ -57,10 +57,14 @@ const TELEMETRY_PATH_MARKERS = [
   '/ping',
 ];
 
-const STATIC_MIME_PREFIXES = ['text/css', 'font/', 'image/svg'];
+const STATIC_MIME_PREFIXES = ['text/css', 'font/', 'image/svg', 'application/wasm'];
 const STATIC_EXTENSIONS = [
   '.css', '.js', '.mjs', '.map', '.woff', '.woff2', '.ttf', '.otf', '.eot',
   '.ico', '.svg', '.webmanifest', '.txt', '.html',
+  // A WASM module is fetched like any other asset. When it is an anti-bot solver the
+  // declaration reaches it through a transform, not through a flow step, so leaving it
+  // in the flow would only invite a generated declaration to make a step out of it.
+  '.wasm',
 ];
 
 const MEDIA_MIME_PREFIXES = ['image/', 'video/', 'audio/', 'model/'];
