@@ -1,6 +1,6 @@
 {
   "name": "@omniproxy/dialect-anthropic",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "description": "The Anthropic Messages-compatible surface, built from UMR and UMS",
   "license": "MIT",

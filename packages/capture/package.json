@@ -1,6 +1,6 @@
 {
   "name": "@omniproxy/capture",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "description": "Traffic capture: HAR import, stream reassembly, sanitization and adapter draft generation",
   "license": "MIT",

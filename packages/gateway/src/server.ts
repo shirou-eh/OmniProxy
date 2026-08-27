@@ -187,6 +187,10 @@ export function createGatewayHandler(options: GatewayOptions): GatewayHandler {
         return sendJson(response, 200, health(options, runtime), cors);
       }
 
+      if (path === '/v1/capabilities' && method === 'GET') {
+        return sendJson(response, 200, capabilities(options, runtime), cors);
+      }
+
       if (needsApiKey(request, url, options.apiKey)) {
         // Phrased by whichever dialect the caller was aiming at, so their client
         // surfaces an auth error rather than an unrecognised payload.
@@ -241,7 +245,7 @@ export function createGatewayHandler(options: GatewayOptions): GatewayHandler {
         404,
         'not_found',
         `no route for ${method} ${path}`,
-        `This build serves ${servedPaths(runtime.routes)}, /v1/models and /health.`,
+        `This build serves ${servedPaths(runtime.routes)}, /v1/models, /v1/capabilities and /health.`,
       );
       return sendJson(response, refused.status, refused.body, cors);
     } catch (error) {
@@ -269,6 +273,46 @@ export function createGatewayHandler(options: GatewayOptions): GatewayHandler {
 function servedPaths(routes: readonly DialectPlugin[]): string {
   const paths = routes.flatMap((route) => route.paths ?? []);
   return paths.length > 0 ? paths.join(', ') : routes.map((route) => route.name).join(', ');
+}
+
+function capabilities(options: GatewayOptions, runtime: Runtime): unknown {
+  return {
+    // What the gateway itself can do — honestly, today only text, one account
+    // and a hundred go through the same code path (ADR-0004), pluggable
+    // dialects are real (PR-13), everything else is still TODO.
+    gateway: {
+      dialects: runtime.routes.map((route) => route.name),
+      modalities: ['text'],
+      concurrencyGate: true,
+      pluggableDialects: true,
+    },
+    // What each provider declares — status as declared (§12.10), capabilities
+    // as declared, context not measured unless `measured` is present.
+    providers: options.providers.map((provider) => ({
+      id: provider.id,
+      status: provider.status,
+      // `class` and `homepage` are part of the declaration; both are honest
+      // about the provider's nature, not about our readiness.
+      class: (provider as unknown as Record<string, unknown>)['class'],
+      homepage: (provider as unknown as Record<string, unknown>)['homepage'],
+      channels: provider.channels.map((channel) => ({
+        id: channel.id,
+        kind: channel.kind,
+        // concurrency is the only channel knob the gateway enforces today.
+        concurrency: (channel as unknown as Record<string, unknown>)['concurrency'] ?? 1,
+      })),
+      models: provider.models.map((model) => ({
+        alias: model.alias,
+        native: (model as unknown as Record<string, unknown>)['native'],
+        modality: model.modality,
+        capability: (model as unknown as Record<string, unknown>)['capability'],
+        // Top-level context is shared; per-model capability may override it.
+        context: provider.context,
+      })),
+      accounts: options.accounts.size(provider.id),
+      capture: (provider as unknown as Record<string, unknown>)['capture'],
+    })),
+  };
 }
 
 function health(options: GatewayOptions, runtime: Runtime): unknown {

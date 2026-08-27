@@ -213,7 +213,7 @@ export function ollamaShow(
 
 /** `GET /api/version`. Ours, plainly labelled, rather than a version of Ollama we are not. */
 export function ollamaVersion(): unknown {
-  return { version: '0.1.2-omniproxy' };
+  return { version: '0.1.3-omniproxy' };
 }
 
 /* ─────────────────────────────────── streaming ─────────────────────────────────── */

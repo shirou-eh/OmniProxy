@@ -65,6 +65,18 @@ Blockers for a truly runnable gateway (found by `git add .` and `docker run` out
   updated: `auth add` is now advertised, `Under construction` no longer
   lists the credential store.
 
+## [0.1.3] — 2026-08-27
+
+**`/v1/capabilities` — честный ответ, что шлюз умеет.**
+
+- `GET /v1/capabilities` — dialects в порядке монтирования, providers с
+  `id/status/class/homepage/channels/models` (alias/native/modality/
+  capability/context as declared, §12.10), `accounts` count, `capture`
+  info. Gateway: `modalities: ['text']`, `concurrencyGate`, `pluggableDialects`.
+  Никаких выдуманных `size`/`contextChars` — только то, что в декларации.
+  404 теперь подсказывает `.../v1/capabilities and /health`.
+
 [0.1.0]: https://github.com/shirou-eh/OmniProxy/releases/tag/v0.1.0
 [0.1.1]: https://github.com/shirou-eh/OmniProxy/releases/tag/v0.1.1
 [0.1.2]: https://github.com/shirou-eh/OmniProxy/releases/tag/v0.1.2
+[0.1.3]: https://github.com/shirou-eh/OmniProxy/releases/tag/v0.1.3

@@ -85,7 +85,7 @@ The store is a JSON file: { "deepseek-web": { "token": "…" } } or a pool
 It is created 0600 (owner-only) and never logged. Delete it with
 \`rm ~/.omniproxy/accounts.json\` (or OMNIPROXY_HOME/accounts.json).`;
 
-export const VERSION_LINE = 'omniproxy 0.1.2 (gateway: openai/anthropic/gemini/ollama + pluggable dialects + auth store)';
+export const VERSION_LINE = 'omniproxy 0.1.3 (gateway: openai/anthropic/gemini/ollama + pluggable dialects + auth store + capabilities)';
 
 export async function run(argv: readonly string[], io: CliIo): Promise<number> {
   const [group, command, ...rest] = argv;

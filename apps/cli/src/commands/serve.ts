@@ -29,6 +29,7 @@ protocols at once, over the same accounts and the same providers.
   POST /v1beta/models/<model>:generateContent  Gemini (and :streamGenerateContent)
   POST /api/chat, /api/generate                Ollama (NDJSON, streaming by default)
   GET  /v1/models, /v1beta/models, /api/tags   every alias, qualified and bare
+  GET  /v1/capabilities                        what this gateway really can do (per provider)
   GET  /health                                 what is loaded, and how accounts are doing
 
 Streaming and non-streaming on all four. Point any client at it:

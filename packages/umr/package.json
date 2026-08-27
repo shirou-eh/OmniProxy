@@ -1,6 +1,6 @@
 {
   "name": "@omniproxy/umr",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "description": "The universal request: one conversation shape every dialect converts into",
   "license": "MIT",
