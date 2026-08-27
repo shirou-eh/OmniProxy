@@ -22,15 +22,20 @@ export const SERVE_USAGE = `omniproxy serve [options]
 Starts the gateway in front of every provider module found. It speaks several client
 protocols at once, over the same accounts and the same providers.
 
-  POST /v1/chat/completions   OpenAI Chat Completions, streaming and not
-  POST /v1/messages           Anthropic Messages, streaming and not
-  GET  /v1/models             every alias, qualified and bare
-  GET  /health                what is loaded, and how the accounts are doing
+  POST /v1/chat/completions                    OpenAI Chat Completions
+  POST /v1/messages                            Anthropic Messages
+  POST /v1beta/models/<model>:generateContent  Gemini (and :streamGenerateContent)
+  GET  /v1/models, /v1beta/models              every alias, qualified and bare
+  GET  /health                                 what is loaded, and how accounts are doing
 
-Point any client at it:
+Streaming and non-streaming on all three. Point any client at it:
 
-  OPENAI_BASE_URL=http://127.0.0.1:8787/v1     OPENAI_API_KEY=unused
-  ANTHROPIC_BASE_URL=http://127.0.0.1:8787     ANTHROPIC_API_KEY=unused
+  OPENAI_BASE_URL=http://127.0.0.1:8787/v1       OPENAI_API_KEY=unused
+  ANTHROPIC_BASE_URL=http://127.0.0.1:8787       ANTHROPIC_API_KEY=unused
+  GOOGLE_GEMINI_BASE_URL=http://127.0.0.1:8787   GEMINI_API_KEY=unused
+
+The key, when you set one, is accepted as Authorization: Bearer, x-api-key,
+x-goog-api-key or ?key= — whichever your client sends.
 
 Options:
   --port <n>            Default: 8787.
@@ -221,6 +226,7 @@ function report(
   io.out('');
   io.out(`  OPENAI_BASE_URL=${gateway.url}/v1`);
   io.out(`  ANTHROPIC_BASE_URL=${gateway.url}`);
+  io.out(`  GOOGLE_GEMINI_BASE_URL=${gateway.url}`);
   if (!keyed) {
     io.out('  ..._API_KEY=unused   (the gateway is on loopback and asks for no key)');
   }

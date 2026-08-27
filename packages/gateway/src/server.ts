@@ -13,8 +13,9 @@ import {
 import type { OmniError, ProviderDeclaration, UMSEvent } from '@omniproxy/schema';
 import { AccountPool, type Account } from './accounts.js';
 import { anthropicDialect } from './anthropic.js';
-import type { DialectHooks, RequestPlan } from './dialect.js';
+import type { DialectHooks, RouteContext, RequestPlan } from './dialect.js';
 import { ConcurrencyGate, gateKey, GateRefused, type Release } from './gate.js';
+import { countTokens, geminiDialect, geminiModels, parseModelPath } from './gemini.js';
 import { openAiDialect, sendJson } from './openai.js';
 import { listModelIds, type Route } from './router.js';
 
@@ -53,10 +54,10 @@ export interface GatewayOptions {
   transforms?: TransformRegistry;
   transformContext?: TransformContext;
   /**
-   * Required from callers. Accepted as `Authorization: Bearer <key>` or as `x-api-key`,
-   * because OpenAI clients send the first and Anthropic clients send the second. When
-   * absent the gateway is open, which is only safe on loopback — `serve` enforces that
-   * pairing, not this function.
+   * Required from callers. Accepted as `Authorization: Bearer <key>`, `x-api-key`,
+   * `x-goog-api-key` or `?key=`, because the three client families each send their own.
+   * When absent the gateway is open, which is only safe on loopback — `serve` enforces
+   * that pairing, not this function.
    */
   apiKey?: string;
   env?: Record<string, string | undefined>;
@@ -86,11 +87,51 @@ interface Runtime {
  * The endpoint chooses — not a header, and not a guess at the body's shape. A client
  * that posts an Anthropic body to the OpenAI path has made a mistake and deserves to be
  * told so, rather than served by accident.
+ *
+ * A matcher rather than a lookup table because Google puts the model and the operation
+ * in the URL (`/v1beta/models/deepseek-web/deepseek-chat:streamGenerateContent`), which
+ * a fixed path cannot express — and the qualified model name contains a slash, so the
+ * segment cannot be read as one word either.
  */
-const DIALECTS: Record<string, DialectHooks<never>> = {
-  '/v1/chat/completions': openAiDialect as unknown as DialectHooks<never>,
-  '/v1/messages': anthropicDialect as unknown as DialectHooks<never>,
-};
+interface DialectRoute {
+  name: string;
+  dialect: DialectHooks<never>;
+  match(path: string): RouteContext | undefined;
+}
+
+const DIALECT_ROUTES: DialectRoute[] = [
+  {
+    name: 'openai',
+    dialect: openAiDialect as unknown as DialectHooks<never>,
+    match: (path) => (path === '/v1/chat/completions' ? {} : undefined),
+  },
+  {
+    name: 'anthropic',
+    dialect: anthropicDialect as unknown as DialectHooks<never>,
+    match: (path) => (path === '/v1/messages' ? {} : undefined),
+  },
+  {
+    name: 'gemini',
+    dialect: geminiDialect as unknown as DialectHooks<never>,
+    match: (path) => {
+      const parsed = parseModelPath(path);
+      if (!parsed) return undefined;
+      // `countTokens` is answered separately, before the request loop: it reaches no
+      // provider and spends no account.
+      if (parsed.method === 'countTokens') return undefined;
+      return { model: parsed.model, method: parsed.method };
+    },
+  },
+];
+
+/** The dialect a caller was aiming at, so a refusal is phrased in their protocol. */
+function routeFor(path: string): { dialect: DialectHooks<never>; context: RouteContext } | undefined {
+  for (const route of DIALECT_ROUTES) {
+    const context = route.match(path);
+    if (context) return { dialect: route.dialect, context };
+  }
+  return undefined;
+}
 
 export function createGatewayHandler(options: GatewayOptions): GatewayHandler {
   const runtime: Runtime = {
@@ -117,10 +158,10 @@ export function createGatewayHandler(options: GatewayOptions): GatewayHandler {
         return sendJson(response, 200, health(options, runtime), cors);
       }
 
-      if (needsApiKey(request, options.apiKey)) {
+      if (needsApiKey(request, url, options.apiKey)) {
         // Phrased by whichever dialect the caller was aiming at, so their client
         // surfaces an auth error rather than an unrecognised payload.
-        const dialect = DIALECTS[path] ?? openAiDialect;
+        const dialect = routeFor(path)?.dialect ?? openAiDialect;
         const refused = dialect.refuse(
           401,
           'authentication',
@@ -134,16 +175,38 @@ export function createGatewayHandler(options: GatewayOptions): GatewayHandler {
         return sendJson(response, 200, models(options, runtime), cors);
       }
 
-      const dialect = DIALECTS[path];
-      if (dialect && request.method === 'POST') {
-        return await handleCompletion(dialect, request, response, options, runtime);
+      if (/^\/v1(?:beta\d*)?\/models$/.test(path) && request.method === 'GET') {
+        return sendJson(response, 200, geminiModels(options.providers), cors);
       }
 
-      const refused = openAiDialect.refuse(
+      const counting = parseModelPath(path);
+      if (counting?.method === 'countTokens' && request.method === 'POST') {
+        const counted = countTokens(
+          await readJsonBody(request),
+          options.providers,
+          counting.model,
+        );
+        return sendJson(response, counted.status, counted.body, cors);
+      }
+
+      const matched = routeFor(path);
+      if (matched && request.method === 'POST') {
+        return await handleCompletion(
+          matched.dialect,
+          matched.context,
+          request,
+          response,
+          options,
+          runtime,
+        );
+      }
+
+      const refused = (matched?.dialect ?? openAiDialect).refuse(
         404,
         'not_found',
         `no route for ${request.method} ${path}`,
-        'This build serves /v1/chat/completions, /v1/messages, /v1/models and /health.',
+        'This build serves /v1/chat/completions, /v1/messages, ' +
+          '/v1beta/models/<model>:generateContent, /v1/models and /health.',
       );
       return sendJson(response, refused.status, refused.body, cors);
     } catch (error) {
@@ -171,7 +234,7 @@ function health(options: GatewayOptions, runtime: Runtime): unknown {
   return {
     status: 'ok',
     time: Math.floor(runtime.now() / 1000),
-    dialects: Object.keys(DIALECTS),
+    dialects: DIALECT_ROUTES.map((route) => route.name),
     providers: options.providers.map((provider) => ({
       id: provider.id,
       // Reported as declared. A provider never verified against the live service says
@@ -220,6 +283,7 @@ function models(options: GatewayOptions, runtime: Runtime): unknown {
 
 async function handleCompletion<T>(
   dialect: DialectHooks<T>,
+  routeContext: RouteContext,
   request: IncomingMessage,
   response: ServerResponse,
   options: GatewayOptions,
@@ -246,7 +310,7 @@ async function handleCompletion<T>(
     return sendJson(response, refused.status, refused.body);
   }
 
-  const planned = dialect.plan(body, options.providers);
+  const planned = dialect.plan(body, options.providers, routeContext);
   if (planned.kind === 'refused') {
     return sendJson(response, planned.status, planned.body, planned.headers ?? {});
   }
@@ -522,21 +586,37 @@ function retryAfterHeader(error: OmniError): Record<string, string> {
 /**
  * Constant-time comparison of the proxy's own key. True means "refuse this request".
  *
- * Both header styles are accepted, because both clients exist: OpenAI SDKs send
- * `Authorization: Bearer`, Anthropic SDKs send `x-api-key`. Refusing one of them would
- * defeat half the point of serving two dialects.
+ * Every style is accepted, because every client exists: OpenAI SDKs send
+ * `Authorization: Bearer`, Anthropic SDKs send `x-api-key`, Google SDKs send
+ * `x-goog-api-key` or a `?key=` parameter. Refusing any of them would defeat the point
+ * of serving their protocols.
+ *
+ * The query parameter is Google's own design and not ours to fix; it is accepted so
+ * their SDKs work, and `serve` still refuses a non-loopback bind without a key, which
+ * is what keeps a key in a URL from being the weakest link.
  *
  * The key guards someone's accounts, and a length-leaking comparison is a five-minute
  * attack on a service that is, by design, reachable from the machine it runs on.
  */
-export function needsApiKey(request: IncomingMessage, expected: string | undefined): boolean {
+export function needsApiKey(
+  request: IncomingMessage,
+  url: URL,
+  expected: string | undefined,
+): boolean {
   if (!expected) return false;
 
-  const authorization = request.headers['authorization'];
-  const apiKeyHeader = request.headers['x-api-key'];
+  const header = (name: string): string => {
+    const value = request.headers[name];
+    return typeof value === 'string' ? value : '';
+  };
+
   const candidates = [
-    typeof authorization === 'string' ? authorization.replace(/^Bearer\s+/i, '') : '',
-    typeof apiKeyHeader === 'string' ? apiKeyHeader : '',
+    header('authorization').replace(/^Bearer\s+/i, ''),
+    // Anthropic SDKs.
+    header('x-api-key'),
+    // Google SDKs, which send either this header or a `key` query parameter.
+    header('x-goog-api-key'),
+    url.searchParams.get('key') ?? '',
   ];
 
   const wanted = Buffer.from(expected);
@@ -566,7 +646,8 @@ export function corsHeaders(request: IncomingMessage): Record<string, string> {
   }
   return {
     'access-control-allow-origin': origin,
-    'access-control-allow-headers': 'authorization, content-type, x-api-key, anthropic-version',
+    'access-control-allow-headers':
+      'authorization, content-type, x-api-key, x-goog-api-key, anthropic-version',
     'access-control-allow-methods': 'GET, POST, OPTIONS',
     vary: 'origin',
   };
@@ -574,6 +655,15 @@ export function corsHeaders(request: IncomingMessage): Record<string, string> {
 
 export const MAX_BODY_BYTES = 32 * 1024 * 1024;
 const BODY_TOO_LARGE = 'request body too large';
+
+/** The body as JSON, or `undefined` when it is not. Used by the bodyless endpoints. */
+async function readJsonBody(request: IncomingMessage): Promise<unknown> {
+  try {
+    return JSON.parse(await readBody(request));
+  } catch {
+    return undefined;
+  }
+}
 
 async function readBody(request: IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];

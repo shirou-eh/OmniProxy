@@ -56,10 +56,24 @@ export interface RespondContext<T> {
   log(line: string): void;
 }
 
+/**
+ * Whatever the URL carried that the body does not.
+ *
+ * Gemini puts the model in the path (`/v1beta/models/x:generateContent`) and the
+ * operation after a colon, so its converter cannot work from the body alone.
+ */
+export interface RouteContext {
+  [key: string]: string;
+}
+
 export interface DialectHooks<T> {
   name: string;
   /** Reads a request, or refuses it in this dialect's own words. */
-  plan(body: unknown, providers: readonly ProviderDeclaration[]): RequestPlan<T> | Refusal;
+  plan(
+    body: unknown,
+    providers: readonly ProviderDeclaration[],
+    context?: RouteContext,
+  ): RequestPlan<T> | Refusal;
   /** A response id, in whatever shape this dialect's clients expect. */
   identity(uuid: () => string): { id: string; model: string };
   respond(context: RespondContext<T>): Promise<void>;

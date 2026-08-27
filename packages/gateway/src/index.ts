@@ -12,6 +12,7 @@ export type { GatewayOptions, GatewayHandler } from './server.js';
 
 export { openAiDialect, numericParams } from './openai.js';
 export { anthropicDialect } from './anthropic.js';
+export { geminiDialect, geminiModels, countTokens } from './gemini.js';
 export type { DialectHooks, RequestPlan, Refusal, RefusalKind, RespondContext } from './dialect.js';
 
 export { serve, isLoopback, ServeError } from './serve.js';

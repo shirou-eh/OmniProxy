@@ -1,8 +1,8 @@
 {
-  "name": "@omniproxy/gateway",
+  "name": "@omniproxy/dialect-gemini",
   "version": "0.0.0",
   "private": true,
-  "description": "The HTTP gateway: standard dialects in front of provider web interfaces",
+  "description": "The Gemini generateContent-compatible surface, built from UMR and UMS",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -15,16 +15,11 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@omniproxy/dialect-anthropic": "workspace:*",
-    "@omniproxy/dialect-gemini": "workspace:*",
-    "@omniproxy/dialect-openai": "workspace:*",
-    "@omniproxy/engine-declarative": "workspace:*",
     "@omniproxy/schema": "workspace:*",
-    "@omniproxy/transport": "workspace:*",
-    "@omniproxy/umr": "workspace:*"
+    "@omniproxy/umr": "workspace:*",
+    "zod": "^4.0.0"
   },
   "devDependencies": {
-    "@omniproxy/provider-sim": "workspace:*",
     "@types/node": "^22.10.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
