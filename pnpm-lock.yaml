@@ -23,10 +23,19 @@ importers:
       '@omniproxy/capture':
         specifier: workspace:*
         version: link:../../packages/capture
+      '@omniproxy/engine-declarative':
+        specifier: workspace:*
+        version: link:../../packages/engine-declarative
       '@omniproxy/schema':
         specifier: workspace:*
         version: link:../../packages/schema
+      '@omniproxy/transport':
+        specifier: workspace:*
+        version: link:../../packages/transport
     devDependencies:
+      '@omniproxy/provider-sim':
+        specifier: workspace:*
+        version: link:../../packages/provider-sim
       '@types/node':
         specifier: ^22.10.0
         version: 22.20.1

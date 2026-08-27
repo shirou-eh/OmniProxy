@@ -127,14 +127,17 @@ describe('omniproxy dispatch', () => {
     const local = recordingIo(process.cwd());
     await run(['--help'], local);
     const help = local.stdout.join('\n');
-    expect(help).not.toContain('capture record');
+    // A CLI that lies about what it can do is the same failure as a gateway that lies
+    // about its providers. This list shrinks as commands land; it never grows ahead.
     expect(help).not.toContain('provider init');
+    expect(help).not.toContain('omniproxy serve');
+    expect(help).not.toContain('auth add');
   });
 
-  it('names the missing command and points at what exists', async () => {
+  it('names what is still under construction rather than implying it exists', async () => {
     const local = recordingIo(process.cwd());
-    expect(await run(['capture', 'record'], local)).toBe(EXIT_USAGE);
-    expect(local.stderr.join('\n')).toContain('PR-7');
+    await run(['--help'], local);
+    expect(local.stdout.join('\n')).toMatch(/Under construction/);
   });
 
   it('rejects an unknown command group', async () => {

@@ -169,6 +169,9 @@ errors:
   - match: { status: 429 }
     as: rate_limit
     retryable: other-account
+    userMessage: >-
+      DeepSeek is rate-limiting this account. Wait for the cooldown, or add another
+      account so requests can move to it.
   - match: { status: 404 }
     as: upstream_unavailable
     retryable: same-account

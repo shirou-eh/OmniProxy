@@ -30,5 +30,16 @@ export {
 } from './transforms.js';
 export type { Transform, TransformContext, WasmPowInstance, DeepSeekChallenge } from './transforms.js';
 
+export {
+  discoverProviders,
+  loadProvider,
+  loadDeclarationFile,
+  providerSearchPath,
+} from './discovery.js';
+export type { DiscoveryOptions, FoundProvider } from './discovery.js';
+
+/** Re-exported so a consumer needs one import, not two, to hold a declaration. */
+export type { ProviderDeclaration } from '@omniproxy/schema';
+
 export { memoryStateStore } from './ports.js';
 export type { HttpClient, HttpRequest, HttpResponse, HttpStreamResponse, StateStore } from './ports.js';
