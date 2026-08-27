@@ -149,7 +149,11 @@ flow:
 errors:
   - match: { status: 401 }
     as: auth_expired
-    retryable: no
+    # `other-account`, not `no`: one account's token expiring says nothing about
+    # another's, and a gateway holding a pool should move on rather than fail the
+    # request. With a single account the pool has nowhere to move and the caller sees
+    # this message, which is the same outcome `no` would have produced.
+    retryable: other-account
     userMessage: >-
       The DeepSeek session has expired. Run `omniproxy auth add deepseek-web` and sign
       in again; the token in localStorage is short-lived.

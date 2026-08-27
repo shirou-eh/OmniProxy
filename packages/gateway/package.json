@@ -1,25 +1,22 @@
 {
-  "name": "@omniproxy/cli",
+  "name": "@omniproxy/gateway",
   "version": "0.0.0",
   "private": true,
-  "description": "omniproxy command line",
+  "description": "The HTTP gateway: standard dialects in front of provider web interfaces",
   "license": "MIT",
   "type": "module",
-  "bin": {
-    "omniproxy": "./dist/main.js"
-  },
-  "files": [
-    "dist"
-  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "files": ["dist"],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
-    "@omniproxy/capture": "workspace:*",
+    "@omniproxy/dialect-openai": "workspace:*",
     "@omniproxy/engine-declarative": "workspace:*",
-    "@omniproxy/gateway": "workspace:*",
     "@omniproxy/schema": "workspace:*",
     "@omniproxy/transport": "workspace:*"
   },

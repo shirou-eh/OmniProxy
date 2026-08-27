@@ -26,6 +26,9 @@ importers:
       '@omniproxy/engine-declarative':
         specifier: workspace:*
         version: link:../../packages/engine-declarative
+      '@omniproxy/gateway':
+        specifier: workspace:*
+        version: link:../../packages/gateway
       '@omniproxy/schema':
         specifier: workspace:*
         version: link:../../packages/schema
@@ -70,6 +73,25 @@ importers:
         specifier: ^2.6.0
         version: 2.9.0
 
+  packages/dialect-openai:
+    dependencies:
+      '@omniproxy/schema':
+        specifier: workspace:*
+        version: link:../schema
+      zod:
+        specifier: ^4.0.0
+        version: 4.4.3
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.0
+        version: 22.20.1
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.7(@types/node@22.20.1)(yaml@2.9.0)
+
   packages/engine-declarative:
     dependencies:
       '@omniproxy/schema':
@@ -82,6 +104,34 @@ importers:
         specifier: ^4.0.0
         version: 4.4.3
     devDependencies:
+      '@types/node':
+        specifier: ^22.10.0
+        version: 22.20.1
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.7(@types/node@22.20.1)(yaml@2.9.0)
+
+  packages/gateway:
+    dependencies:
+      '@omniproxy/dialect-openai':
+        specifier: workspace:*
+        version: link:../dialect-openai
+      '@omniproxy/engine-declarative':
+        specifier: workspace:*
+        version: link:../engine-declarative
+      '@omniproxy/schema':
+        specifier: workspace:*
+        version: link:../schema
+      '@omniproxy/transport':
+        specifier: workspace:*
+        version: link:../transport
+    devDependencies:
+      '@omniproxy/provider-sim':
+        specifier: workspace:*
+        version: link:../provider-sim
       '@types/node':
         specifier: ^22.10.0
         version: 22.20.1

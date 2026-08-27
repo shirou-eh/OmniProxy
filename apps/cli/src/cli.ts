@@ -3,6 +3,7 @@ import { CAPTURE_IMPORT_USAGE, runCaptureImport } from './commands/capture-impor
 import { CAPTURE_RECORD_USAGE, runCaptureRecord } from './commands/capture-record.js';
 import { CAPTURE_SANITIZE_USAGE, runCaptureSanitize } from './commands/capture-sanitize.js';
 import { PROVIDER_DRAFT_USAGE, runProviderDraft } from './commands/provider-draft.js';
+import { runServe } from './commands/serve.js';
 import {
   PROVIDER_LIST_USAGE,
   PROVIDER_VALIDATE_USAGE,
@@ -21,6 +22,8 @@ import { EXIT_OK, EXIT_USAGE, type CliIo } from './io.js';
 export const USAGE = `omniproxy — universal relay for provider web APIs
 
 Usage:
+  omniproxy serve [--port <n>] [--accounts <file.json>]
+
   omniproxy provider list [--provider-dir <dir>]
   omniproxy provider validate [<id>]
   omniproxy provider draft <bundle.json> [--out <path>]
@@ -32,8 +35,8 @@ Usage:
 
 Run a command with --help for its options.
 
-Under construction: the gateway itself and the browser-based recorder. See
-docs/omniproxy/04-phase-1-plan.md for what lands next.`;
+Under construction: the Anthropic and Gemini dialects, and the browser-based recorder.
+See docs/omniproxy/04-phase-1-plan.md for what lands next.`;
 
 const CAPTURE_USAGE = `omniproxy capture — record and prepare provider traffic
 
@@ -54,7 +57,7 @@ const PROVIDER_USAGE = `omniproxy provider — provider modules
 A provider module is a directory containing provider.yaml. Yours are found the same
 way ours are, and yours take precedence — see ADR-0003.`;
 
-export const VERSION_LINE = 'omniproxy 0.0.0 (phase 1: capture pipeline)';
+export const VERSION_LINE = 'omniproxy 0.0.0 (phase 2: the gateway)';
 
 export async function run(argv: readonly string[], io: CliIo): Promise<number> {
   const [group, command, ...rest] = argv;
@@ -67,6 +70,12 @@ export async function run(argv: readonly string[], io: CliIo): Promise<number> {
   if (group === '--version' || group === '-v') {
     io.out(VERSION_LINE);
     return EXIT_OK;
+  }
+
+  if (group === 'serve') {
+    // No subcommand: `omniproxy serve` is the whole thing, and `command` is just its
+    // first flag.
+    return runServe(command === undefined ? [] : [command, ...rest], io);
   }
 
   if (group === 'capture') {

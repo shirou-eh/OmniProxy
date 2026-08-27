@@ -130,8 +130,8 @@ describe('omniproxy dispatch', () => {
     // A CLI that lies about what it can do is the same failure as a gateway that lies
     // about its providers. This list shrinks as commands land; it never grows ahead.
     expect(help).not.toContain('provider init');
-    expect(help).not.toContain('omniproxy serve');
     expect(help).not.toContain('auth add');
+    expect(help).not.toContain('omniproxy tenant');
   });
 
   it('names what is still under construction rather than implying it exists', async () => {
@@ -148,6 +148,6 @@ describe('omniproxy dispatch', () => {
 
   it('reports a version', async () => {
     expect(await run(['--version'], io)).toBe(EXIT_OK);
-    expect(io.stdout.join('\n')).toContain('phase 1');
+    expect(io.stdout.join('\n')).toMatch(/^omniproxy \d+\.\d+\.\d+ /);
   });
 });
