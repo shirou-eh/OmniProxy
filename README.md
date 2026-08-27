@@ -13,276 +13,355 @@
 <img src="https://img.shields.io/badge/license-MIT-E1BEE7?style=flat-square" alt="license"/>
 </p>
 
+# OmniProxy — универсальный шлюз
+
+**OmniProxy** ставит **стандартный API** (совместимый с OpenAI / Anthropic / Gemini / Ollama) поверх **веб-интерфейсов** провайдеров — тех самых эндпоинтов, куда ходит твой залогиненный браузер. Без платных API, без привязки к вендору, твои аккаунты — твой шлюз. Поддерживает все модальности: текст, изображения, видео, аудио, музыка, речь, 3D (через `provider.yaml`).
+
+> **Статус: `v0.1.4` — шлюз работает.** `omniproxy serve` отвечает на запросы в форматах OpenAI, Anthropic, Gemini и Ollama поверх любого модуля провайдера — с пулом аккаунтов, потоковой отдачей, воротами конкурентности и честным `unverified`. **Ни один провайдер ещё не проверен против живого сервиса**: все декларации `unverified` и прогоняются целиком только против протокольно достоверного локального симулятора (`packages/provider-sim` с настоящим `sha3_wasm_bg`). `legacy/` — **минимальный пример** оригинального прокси (41 тест), не ядро — см. `legacy/README.md` если нужно. Этот README не врёт: пока каждая часть не станет реальной и покрытой тестами — так и написано.
+
 ---
 
-## English
+## Содержание
 
-### What is OmniProxy?
+- [Архитектура за 30 секунд](#архитектура-за-30-секунд)
+- [Быстрый старт — поставил и забыл](#быстрый-старт--поставил-и-забыл)
+- [Аутентификация — где лежат токены](#аутентификация--где-лежат-токены)
+- [Провайдеры — подключи свой без форка](#провайдеры--подключи-свой-без-форка)
+- [Конвейер захвата — от трафика к декларации](#конвейер-захвата--от-трафика-к-декларации)
+- [Диалекты — пятый протокол это файл](#диалекты--пятый-протокол-это-файл)
+- [Диагностика — doctor без утечек](#диагностика--doctor-без-утечек)
+- [Эндпоинты шлюза](#эндпоинты-шлюза)
+- [Документация — куда дальше](#документация--куда-дальше)
+- [Разработка — как собрать и тестировать](#разработка--как-собрать-и-тестировать)
+- [Развёртывание — Docker и systemd](#развёртывание--docker-и-systemd)
+- [Безопасность и права](#безопасность-и-права)
+- [Юридическая рамка](#юридическая-рамка)
+- [История и принципы](#история-и-принципы)
 
-OmniProxy puts a **standard API** (OpenAI / Anthropic / Gemini / Ollama-compatible) in front of provider **web interfaces** — the same endpoints your logged-in browser talks to. No paid APIs, no vendor lock-in, your accounts, your gateway.
+---
 
-- **One server, four protocols** — `POST /v1/chat/completions` (OpenAI), `POST /v1/messages` (Anthropic), `POST /v1beta/models/...:generateContent` (Gemini), `POST /api/chat|/api/generate` (Ollama NDJSON). Streaming and non-streaming, same prompt byte-for-byte whichever SDK you use.
-- **1 → N accounts** — one account is the degenerate case, not a special case. Requests move to the next account only before the provider starts answering (commit boundary), never after.
-- **A fifth protocol is a file** — `DialectPlugin` (`name`, `dialect`, `match`, `side`, `paths`). Your `.mjs` is mounted *before* the built-ins, so it can even replace one. See [`07-writing-a-dialect.md`](docs/omniproxy/07-writing-a-dialect.md).
-- **Honest about readiness** — every declaration is `unverified` until someone records live traffic; `/health` prints status as declared, never invents `size`/`contextChars`.
+## Архитектура за 30 секунд
 
-> **Status:** `v0.1.4` — gateway runs, 885 tests green (Windows/Linux, Node 22/24). `providers/deepseek-web` is `unverified` (derived from a working client, executed only against a local simulator). `legacy/` is a **minimal example** of the original proxy, not the core — see [`legacy/README.md`](legacy/README.md) if you need it.
-
-### Quick start — set and forget
-
-**Option A — Docker (one command, restarts on failure):**
-
-```bash
-# 1) store a credential once (prompts for token if you omit --field)
-docker run --rm -v omniproxy_data:/home/omniproxy/.omniproxy omniproxy:0.1.4 \
-  node apps/cli/dist/main.js auth add deepseek-web --field token=YOUR_TOKEN
-# where it lives / how to delete:
-docker run --rm -v omniproxy_data:/home/omniproxy/.omniproxy omniproxy:0.1.4 \
-  node apps/cli/dist/main.js auth path   # → /home/omniproxy/.omniproxy/accounts.json
-# rm volume: docker volume rm omniproxy_data
-
-# 2) run
-docker compose up -d && docker compose logs -f
-# open http://127.0.0.1:8787/health  →  {status:"ok"}
+```
+любой SDK  →  диалект (OpenAI/Anthropic/Gemini/Ollama/твой)  →  UMR (универсальный запрос)
+                                                                              ↓
+provider.yaml  →  движок (flow, JSONPath, трансформы)  →  HTTP  →  веб-интерфейс провайдера
+                                                                              ↓
+                                                                       UMS (поток событий)
+                                                                              ↓
+                                                                    диалект → ответ SDK
 ```
 
-**Option B — pnpm (from source):**
+- **UMR** (`packages/umr`): `flattenConversation` — один промпт байт-в-байт любым SDK, парсер текстовой эмуляции `tool_call`.
+- **UMS** (`packages/schema`): события `start`/`delta`/`warning`/`error`, собирается только из них.
+- **Движок** (`packages/engine-declarative`): шаблоны `{{ }}` (`?`/`null-if-empty`), JSONPath, трансформы (`deepseek-pow-v0`, `uuid-v4`...), фрейминг `sse`/`ndjson`/`json-patch`.
+- **Шлюз** (`packages/gateway`): маршрутизация `alias` → `provider`, пул `1..N` (ADR-0004, нет `if (len===1)`), `ConcurrencyGate` на пару `аккаунт+канал`, граница коммита (ретрай только до первого `content`).
+- **Транспорт** (`packages/transport`): `fetchHttpClient` / `recording` / `replay`, `allowedHosts` до запроса, `bodyEncoding: base64` для бинаря.
+- **Обнаружение** (`discovery.ts`): `--provider-dir` > `$OMNIPROXY_PROVIDER_PATH` (`:`/`;` по OS) > `~/.omniproxy/providers/` > `providers/` в репо, первый найденный побеждает — твой шлюз.
+- **Принципы:** никакого `if (provider===…)` в `core/gateway` (§12.3), состояние запроса живёт **один запрос** (ADR-0008, риск R-6 закрыт), секреты никогда не в `git`/логах/`/health` (§12.7), не выдумываем эндпоинты (§12.1).
+
+---
+
+## Быстрый старт — поставил и забыл
+
+### Вариант A — Docker (одна команда, рестарт при падении, 0600-volume)
+
+```bash
+# 1) токен один раз (спросит token: если без --field, TTY)
+docker run --rm -v omniproxy_data:/home/omniproxy/.omniproxy omniproxy:0.1.4 \
+  node apps/cli/dist/main.js auth add deepseek-web --field token=ВАШ_ТОКЕН
+
+# где лежит / как удалить:
+docker run --rm -v omniproxy_data:/home/omniproxy/.omniproxy omniproxy:0.1.4 \
+  node apps/cli/dist/main.js auth path   # → /home/omniproxy/.omniproxy/accounts.json
+# docker volume rm omniproxy_data  — или: auth remove deepseek-web
+
+# 2) поднять (healthcheck на /health, restart unless-stopped)
+docker compose up -d && docker compose logs -f
+# http://127.0.0.1:8787/health → {"status":"ok"}
+
+# без compose:
+docker build -f Containerfile -t omniproxy:0.1.4 . && \
+docker run -d --restart unless-stopped -p 127.0.0.1:8787:8787 \
+  -v omniproxy_data:/home/omniproxy/.omniproxy \
+  -e OMNIPROXY_API_KEY=длинный_секрет_если_нужен_0.0.0.0 \
+  omniproxy:0.1.4
+```
+
+### Вариант B — pnpm из исходников (Windows и Linux — оба первого класса)
 
 ```bash
 git clone https://github.com/shirou-eh/OmniProxy.git && cd OmniProxy
-pnpm install --frozen-lockfile && pnpm run build
+pnpm install --frozen-lockfile   # pnpm 11.24, node >=22 (см. package.json:engines)
+pnpm run build                   # tsc, turbo
 
-# 1) credential (0600 file at ~/.omniproxy/accounts.json)
+# 1) учётка (0600 файл ~/.omniproxy/accounts.json)
 node apps/cli/dist/main.js auth add deepseek-web --field token=...
-node apps/cli/dist/main.js auth list          # names of fields only, never values
-node apps/cli/dist/main.js auth path          # where it lives
+# без --field в TTY спросит интерактивно; пул: второй --id work
+node apps/cli/dist/main.js auth add qwen-web --id work --field token=...
+node apps/cli/dist/main.js auth list                 # только имена полей, никогда значения
+node apps/cli/dist/main.js auth list --json | jq
+node apps/cli/dist/main.js auth path                 # где лежит
 
-# 2) serve (loopback by default; 0.0.0.0 needs --api-key)
+# 2) шлюз (loopback по умолчанию; 0.0.0.0 без --api-key отклоняется, а не ворнится)
 node apps/cli/dist/main.js serve --port 8787
-# env fallback also works: HOST=0.0.0.0 PORT=8787 OMNIPROXY_API_KEY=secret node ... serve
+# env тоже работает: HOST=0.0.0.0 PORT=8787 OMNIPROXY_API_KEY=secret node ... serve
+# --dialect ./my.mjs --provider deepseek-web --provider-dir ./my/providers --env K=V
 
-# 3) use any SDK
+# 3) любой SDK — один промпт байт-в-байт любым диалектом (тест на это есть)
 OPENAI_BASE_URL=http://127.0.0.1:8787/v1 OPENAI_API_KEY=unused \
   curl http://127.0.0.1:8787/v1/chat/completions -H content-type:application/json \
-  -d '{"model":"deepseek-chat","messages":[{"role":"user","content":"hi"}]}'
+  -d '{"model":"deepseek-chat","messages":[{"role":"user","content":"привет"}]}'
 
-# 4) diagnose (no secrets, --anonymized for bug reports)
+ANTHROPIC_BASE_URL=http://127.0.0.1:8787 ANTHROPIC_API_KEY=unused \
+  curl http://127.0.0.1:8787/v1/messages -H content-type:application/json -H anthropic-version:2023-06-01 \
+  -d '{"model":"deepseek-chat","max_tokens":64,"messages":[{"role":"user","content":"hi"}]}'
+
+GOOGLE_GEMINI_BASE_URL=http://127.0.0.1:8787 GEMINI_API_KEY=unused \
+  curl http://127.0.0.1:8787/v1beta/models/deepseek-chat:generateContent -H content-type:application/json \
+  -d '{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}'
+
+OLLAMA_HOST=http://127.0.0.1:8787 curl http://127.0.0.1:8787/api/chat -H content-type:application/json \
+  -d '{"model":"deepseek-chat","messages":[{"role":"user","content":"hi"}],"stream":false}'
+
+# 4) что доступно и диагностика (без секретов)
+curl http://127.0.0.1:8787/v1/models          # OpenAI-совместимый список всех алиасов
+curl http://127.0.0.1:8787/v1/capabilities    # что реально умеет шлюз per provider
+curl http://127.0.0.1:8787/health            # dialects в порядке монтирования, providers, accounts (имена полей), inFlight
 node apps/cli/dist/main.js doctor
+node apps/cli/dist/main.js doctor --anonymized  # без абсолютных путей для багрепорта
 node apps/cli/dist/main.js doctor --json | jq
 ```
 
-**Environment:** `Authorization: Bearer …` / `x-api-key` / `x-goog-api-key` / `?key=` — whichever your client sends. `GET /health`, `GET /v1/models`, `GET /v1/capabilities` need no key.
-
-### Auth — where it lives
-
-```
-~/.omniproxy/accounts.json  (or $OMNIPROXY_HOME/accounts.json)
-  0700 dir, 0600 file (owner-only; Windows ACL). Never committed (.gitignore).
-  { "deepseek-web": {"token":"…"} }  or  { "qwen-web": [{"id":"work","fields":{"token":"…"}}] }
-```
-
-`pnpm run build && node apps/cli/dist/main.js auth add deepseek-web` without `--field` prompts interactively (`token:`). Pool: second `auth add --id work` promotes single → pool.
-
-### Providers — your own without a fork
-
-```bash
-omniproxy provider list                           # every module found, origin flag/env/home/repo
-omniproxy provider validate deepseek-web          # errors vs warnings
-omniproxy capture record deepseek-web --auth ./auth.json --prompt "hi"  # → raw bundle in ~/.omniproxy/tmp (TTL 1h, 0600)
-omniproxy capture sanitize <bundle>              # → fixtures/ (stable {{redacted:*}} placeholders)
-omniproxy capture analyze <bundle> --compare <other>  # why each call exists, where ids flow
-omniproxy provider draft <bundle> --out ./out.yaml     # status: needs-capture + TODO(capture), never guesses
-```
-
-Your `~/.omniproxy/providers/<id>/provider.yaml` **shadows** ours (ADR-0003). No `if (provider===…)` in gateway — UMR in, UMS out.
-
-### Dialects — your own protocol
-
-`--dialect ./my.mjs` — JS module exporting `{name, dialect:{plan,identity,respond,error,refuse}, match(path,method), paths?, side?}`. Mounted before built-ins, `body` read once and shared with the request loop. Full example in [`07-writing-a-dialect.md`](docs/omniproxy/07-writing-a-dialect.md) — ~40 lines.
-
-### Docs
-
-| Doc | What it settles |
-|---|---|
-| `docs/omniproxy/00-risks.md` | What can fail, honestly |
-| `01-monorepo.md` | Current layout (what exists today is marked [+]) vs vision |
-| `02-provider-yaml.md` | Declaration format (`unverified` etc.) |
-| `05-reliability-charter.md` | 10 invariants, each with a test |
-| `06-hackability-charter.md` | Your right to rewire |
-| `07-writing-a-dialect.md` | Add a protocol without a fork |
-| `docs/omniproxy/adr/` | Decisions (0001…0008) |
-| `docs/providers/deepseek-web.md` | Provider dossier, how to verify live |
-
-Two principles: **Reliability over speed** — a broken provider never takes the gateway down; **You are in charge** — user dirs shadow ours, open formats, no telemetry.
-
-### Development
-
-```bash
-pnpm install
-pnpm run build && pnpm run typecheck && pnpm exec turbo run test --force  # 885 = 844 vitest +41 legacy
-pnpm run legacy:test
-pnpm exec turbo telemetry disable   # if you want
-```
-
-Windows and Linux are first-class (ADR-0005).
-
-### Legal & ToS
-
-OmniProxy drives provider web interfaces with **your own** sessions. This violates most ToSes — **accounts can be banned**. Use only accounts you own and can risk. No bulk registration, no credential sharing, no paid-limit bypass. MIT, no telemetry, no hosted component.
+Ключ принимается как `Authorization: Bearer` / `x-api-key` / `x-goog-api-key` / `?key=` — что шлёт твой клиент. `GET /health|/v1/models|/v1/capabilities` без ключа. Порт по умолчанию `8787`.
 
 ---
 
-## Русский
-
-### Что такое OmniProxy?
-
-OmniProxy ставит **стандартный API** (OpenAI / Anthropic / Gemini / Ollama-совместимый) поверх **веб-интерфейсов** провайдеров — тех эндпоинтов, куда ходит залогиненный браузер. Без платных API, без лока, ваши аккаунты — ваш шлюз.
-
-- **Один сервер, четыре протокола** — `POST /v1/chat/completions`, `/v1/messages`, `/v1beta/models/...:generateContent`, `/api/chat|/api/generate` (NDJSON). Поток и без потока, один промпт байт-в-байт любым SDK.
-- **1 → N аккаунтов** — один аккаунт вырожденный случай, не ветка. Переход на следующий только до первого токена от провайдера (граница коммита).
-- **Пятый протокол — файл** — `DialectPlugin` (`--dialect ./my.mjs`), монтируется *перед* встроенными, может заменить любой. См. `07-writing-a-dialect.md` — ~40 строк.
-- **Честно про готовность** — все декларации `unverified` пока никто не записал живой трафик; `/health` печатает как задекларировано.
-
-> **Статус:** `v0.1.4` — шлюз работает, 885 тестов зелёные. `providers/deepseek-web` `unverified` (из рабочего клиента, прогнан только против симулятора). `legacy/` — **минимальный пример** старого прокси, не ядро.
-
-### Быстрый старт — поставил и забыл
-
-**Docker (одна команда, рестарт при падении):**
-
-```bash
-docker run --rm -v omniproxy_data:/home/omniproxy/.omniproxy omniproxy:0.1.4 \
-  node apps/cli/dist/main.js auth add deepseek-web --field token=ВАШ_ТОКЕН
-docker compose up -d && docker compose logs -f
-# http://127.0.0.1:8787/health → {"status":"ok"}
-```
-
-**pnpm (из исходников):**
-
-```bash
-git clone https://github.com/shirou-eh/OmniProxy.git && cd OmniProxy
-pnpm install --frozen-lockfile && pnpm run build
-node apps/cli/dist/main.js auth add deepseek-web --field token=...
-node apps/cli/dist/main.js auth list        # только имена полей
-node apps/cli/dist/main.js serve --port 8787
-# curl как выше
-node apps/cli/dist/main.js doctor --anonymized  # для багрепорта без путей
-```
-
-Ключ принимается как `Authorization: Bearer` / `x-api-key` / `x-goog-api-key` / `?key=`. `GET /health|/v1/models|/v1/capabilities` без ключа. `0.0.0.0` без `--api-key` **отклоняется**.
-
-### Учётные данные — где лежат
+## Аутентификация — где лежат токены
 
 ```
 ~/.omniproxy/accounts.json  (или $OMNIPROXY_HOME/accounts.json)
-  0700 папка, 0600 файл (только владелец; Windows ACL). Никогда не коммитится.
-  { "deepseek-web": {"token":"…"} }  или  { "qwen-web": [{"id":"work","fields":{"token":"…"}}] }
+  папка 0700, файл 0600 (только владелец; Windows ACL; будущий DPAPI/libsecret)
+  никогда не коммитится (.gitignore: accounts*.json, *.raw.json, *.har)
+  формат:
+    { "deepseek-web": {"token":"…"} }
+    { "qwen-web": [{"id":"work","fields":{"token":"…"}},{"id":"personal","fields":{"token":"…"}}] }
 ```
 
-Без `--field` в TTY спросит `token:` интерактивно. Второй `auth add --id work` делает пул. Удалить: `rm ~/.omniproxy/accounts.json` или `auth remove`.
-
-### Провайдеры — свой без форка
-
-```bash
-omniproxy provider list
-omniproxy capture record deepseek-web --auth ./auth.json
-omniproxy capture sanitize <bundle> && omniproxy capture analyze <bundle> --compare <other>
-omniproxy provider draft <bundle> --out ./out.yaml  # needs-capture + TODO(capture)
-```
-
-Ваш `~/.omniproxy/providers/<id>/provider.yaml` **затеняет** наш.
-
-### Диалекты — свой протокол
-
-`--dialect ./my.mjs` — модуль, экспортирующий `DialectPlugin`. Тело читается один раз и шарится между `side` и циклом запроса.
-
-### Доки
-
-Те же, что в английской таблице — все по-русски. Принципы: **Надёжность важнее скорости**, **Пользователь — закон**.
-
-### Разработка
-
-`pnpm install && pnpm run build && pnpm run typecheck && pnpm exec turbo run test --force` — 885 = 844 vitest +41 legacy.
-
-### Юридика
-
-Работа через ваши сессии нарушает ToS большинства сервисов — **бан возможен**. Только свои аккаунты, которым готовы рискнуть.
+- `auth add deepseek-web --field token=...` — один аккаунт как плоский объект.
+- Второй `auth add deepseek-web --id work --field token=...` — промотирует в пул `[{id,fields},{id,fields}]`.
+- Дубликат `id` — отказ с подсказкой.
+- `auth list` — `provider  id  fields: token, cookie` и `store: /path`; ` --json` → `[{provider,id,fields[]}]` (значений нет, §12.7).
+- `auth remove deepseek-web` — весь провайдер; ` --id work` — один из пула.
+- `auth path` — путь. Удалить: `rm ~/.omniproxy/accounts.json` (или `$OMNIPROXY_HOME`).
+- `serve` читает тот же путь; `--accounts <file>` — разовый файл; если файл `044` (group/other readable) — `warning: chmod 600`.
+- Без `--field` в TTY — интерактивный `token:` промпт.
 
 ---
 
-## 中文
-
-### 什么是 OmniProxy？
-
-OmniProxy 在服务商 **网页界面**（浏览器登录后访问的那些端点）前放置 **标准 API**（兼容 OpenAI / Anthropic / Gemini / Ollama）。不用付费 API，不被锁定，你的账号，你的网关。
-
-- **一个服务，四种协议** — `POST /v1/chat/completions` (OpenAI)、`POST /v1/messages` (Anthropic)、`POST /v1beta/models/...:generateContent` (Gemini)、`POST /api/chat|/api/generate` (Ollama NDJSON)。流式/非流式，同一对话到上游是逐字节相同的 prompt。
-- **1 → N 账号** — 单账号是退化情况，不是分支。仅在提供商开始回答前才换账号（提交边界）。
-- **第五种协议是一个文件** — `DialectPlugin` (`--dialect ./my.mjs`)，挂载在内置四种之前，可替换任意一种。见 `07-writing-a-dialect.md`，约 40 行。
-- **诚实声明就绪度** — 所有声明为 `unverified`，直到有人用真实账号录制流量；`/health` 按声明打印。
-
-> **状态：** `v0.1.4` — 网关可运行，885 测试全绿。`providers/deepseek-web` 为 `unverified`（来自可用客户端，仅在本地模拟器上端到端执行）。`legacy/` 仅是 **最小示例**，不是核心。
-
-### 快速开始 — 一次设置，忘记它
-
-**Docker（一条命令，失败自动重启）：**
+## Провайдеры — подключи свой без форка
 
 ```bash
-docker run --rm -v omniproxy_data:/home/omniproxy/.omniproxy omniproxy:0.1.4 \
-  node apps/cli/dist/main.js auth add deepseek-web --field token=你的TOKEN
+omniproxy provider list --json                    # id, origin flag/env/home/repo, dir, status, warnings
+omniproxy provider validate deepseek-web          # Zod + ссылки на трансформы/фикстуры, errors vs warnings
+omniproxy provider validate --provider-dir ./my   # твои рядом с нашими, твои побеждают
+```
+
+**Порядок поиска** (первый найденный побеждает, ADR-0003): `--provider-dir` > `$OMNIPROXY_PROVIDER_PATH` (делитель `path.delimiter`, `:`/`;`) > `~/.omniproxy/providers/` > `providers/` в репо (fallback по месту самого CLI — работает из `/tmp` и `docker`). Битая декларация одного провайдера не валит остальных (I-1).
+
+Твой модуль — папка `~/.omniproxy/providers/<id>/provider.yaml` ( + `fixtures/` + опционально `adapter.ts` по ADR-0002 ур.3). Скопируй `providers/deepseek-web/provider.yaml` как шаблон.
+
+**Классы сложности** (§7, `02-provider-yaml.md`): `A` (cookie+PoW) … `G` (video) — `deepseek-web` класс `A`.
+
+---
+
+## Конвейер захвата — от трафика к декларации
+
+Декларация пишется **только** из записанного трафика (§12.1, §12.5 — нет `TODO позже`).
+
+```bash
+omniproxy capture record deepseek-web --auth ./auth.json --prompt "hi" --model deepseek-chat
+# → сырой бандл в ~/.omniproxy/tmp/ (TTL 1h, 0600, UNSANITIZED, с живыми cookie)
+
+omniproxy capture import <file.har> --provider my-cool --scenario chat --out ./tmp
+# HAR 1.2 из DevTools, порядок заголовков сохранён, SSE → frames, base64
+
+omniproxy capture sanitize <bundle> --out ./san.json
+# стабильные {{redacted:kind:n}} (один токен → один плейсхолдер), идемпотентен,
+# структура cookie/Set-Cookie/Bearer сохранена, перепроверка готового файла
+
+omniproxy capture analyze <bundle> --compare <other> [--json]
+# классификация с "почему" (preflight/telemetry/static/SSE/session…), граф "значение из ответа A в запросе B",
+# volatileFields (что меняется между прогонами → станет {{ }})
+
+omniproxy provider draft <bundle> --out ./provider.yaml
+# черновик: только то, что было в записи; где запись молчит — '# TODO(capture): …', а не догадка
+# статус всегда needs-capture — поднять может только человек
+```
+
+Движок (`engine-declarative`): `{{req.prompt}}` / `{{state.sessionId}}` / `{{state.parentMessageId?}}` / `{{state.x|null-if-empty}}` / `{{vars.pow}}` / `{{env.K}}`, JSONPath `$.a.b[0]`, `regex:`, `header:`, трансформы `uuid-v4`, `hmac-sha256`, `deepseek-pow-v0` (настоящий `wasm`), фрейминг `sse`/`ndjson`/`json-patch`.
+
+Симулятор (`provider-sim`): локальный сервер, говорящий как `legacy/server.js`, с настоящим `sha3_wasm_bg` — 23 сквозных теста `transport` ловят рассинхрон до проде.
+
+---
+
+## Диалекты — пятый протокол это файл
+
+Четыре встроенных — обычные `DialectPlugin`, монтируются тем же путём, что твой. Привилегированного входа нет.
+
+```ts
+export default {
+  name: "plain",
+  dialect: { name:"plain", plan(body,providers){...}, identity(uuid){...}, async respond({events,response,settle}){...}, error(e){...}, refuse(status,kind,msg,action){...} },
+  paths: ["/say"],
+  match: (path,method)=> method==="POST"&&path==="/say" ? {} : undefined,
+  side: (req)=> req.path==="/say/models" ? {status:200,body:{can:[...]}} : undefined
+}
+```
+
+```bash
+omniproxy serve --dialect ./my.mjs                 # файл
+omniproxy serve --dialect ./dialects/              # каталог, сортируется, детерминирован (ADR-0005)
+# экспорт может называться default / dialect / plugin
+# --dialect исполняет чужой JS с твоими аккаунтами — один warning при старте, дальше делает что просишь
+```
+
+`body` читается один раз и шарится между `side` и циклом запроса; `side` не тратит аккаунт. Подробно: `docs/omniproxy/07-writing-a-dialect.md` — контракт, 40-строчный рабочий пример, где смотреть (`packages/dialect-*/`).
+
+---
+
+## Диагностика — doctor без утечек
+
+```bash
+omniproxy doctor                 # human: node/platform/cwd, providers, auth store
+omniproxy doctor --json          # machine
+omniproxy doctor --anonymized    # для issue, без абсолютных путей
+```
+
+Проверяет: `node >=22`, `providers` (shadowing, `BROKEN` с причиной), `auth store` (`exists`, `mode`, `validJson`, `accounts`, `warning: chmod 600`), подсказывает `auth add`. Секреты — только `fields[]` (имена), никогда значения (§12.7, тест `health` на это).
+
+---
+
+## Эндпоинты шлюза
+
+| Метод | Путь | Что |
+|---|---|---|
+| `POST` | `/v1/chat/completions` | OpenAI Chat Completions (SSE `text/event-stream` и JSON) |
+| `POST` | `/v1/messages` | Anthropic Messages (`system` как поле, нумерованные блоки) |
+| `POST` | `/v1beta/models/<m>:generateContent` | Gemini (`:streamGenerateContent` тоже, `safetyRatings:[]`, `countTokens` как `estimated:true`) |
+| `POST` | `/api/chat` | Ollama Chat (NDJSON, `stream` по умолчанию `true`) |
+| `POST` | `/api/generate` | Ollama Generate (`response` вместо `message`) |
+| `GET` | `/v1/models` | Все алиасы, `qualified` и `bare` (superset OpenAI+Anthropic) |
+| `GET` | `/v1beta/models` | Gemini-форма (`models/deepseek-chat`) |
+| `GET` | `/api/tags` | Ollama tags (`size:0,dgest:""` честно, файла нет) |
+| `POST` | `/api/show` | Ollama show (`omniproxy.status` как задекларировано, без `context length`) |
+| `GET` | `/api/version` | `0.1.4-omniproxy`, не версия Ollama |
+| `GET` | `/v1/capabilities` | Что реально умеет шлюз per provider (без выдумок `§12.10`) |
+| `GET` | `/health`, `/healthz` | `dialects` в порядке монтирования, `providers` (`unverified` остаётся), `accounts` (имена полей), `inFlight` |
+| — | `/nope` | `404` с `This build serves …, /v1/models, /v1/capabilities and /health.` |
+
+`OPTIONS` → `204` CORS (только `localhost`/`127.0.0.1`/`::1`, wildcard запрещён — иначе любая страница тратила бы твои аккаунты).
+
+---
+
+## Документация — куда дальше
+
+| Документ | Что |
+|---|---|
+| `docs/en/*`, `docs/ru/*`, `docs/zh/*` | Трёхязычные доки (скоро) |
+| `docs/omniproxy/00-risks.md` | Что сломается, честно |
+| `01-monorepo.md` | Текущая раскладка `[+]` — что есть сегодня vs визион |
+| `02-provider-yaml.md` | Формат декларации (`unverified` etc.) |
+| `05-reliability-charter.md` | 10 инвариантов, каждый с тестом |
+| `06-hackability-charter.md` | Твоё право переопределить |
+| `07-writing-a-dialect.md` | Свой протокол без форка |
+| `docs/omniproxy/adr/` | Решения 0001…0008 |
+| `docs/providers/deepseek-web.md` | Досье провайдера, как верифицировать live |
+
+Принципы: **Надёжность важнее скорости** — сломанный провайдер не валит шлюз; **Пользователь — закон** — `~/.omniproxy` затеняет, открытые форматы, без телеметрии.
+
+---
+
+## Разработка — как собрать и тестировать
+
+```bash
+pnpm install --frozen-lockfile   # pnpm 11.24, node >=22
+pnpm run build                   # turbo, tsc
+pnpm run typecheck               # strict, exactOptionalPropertyTypes
+pnpm exec turbo run test --force # 885 = 844 vitest +41 legacy (node:test, сервер и pow)
+pnpm run legacy:test             # только legacy (41)
+pnpm exec turbo telemetry disable
+```
+
+CI: `push`/`PR` → `build` + `typecheck` + `test` на `ubuntu/windows × node 22/24`, `secrets-scan` (JWT/`smidV2`/cookies), `audit --audit-level high`. `turbo` кэш — `FULL TURBO` значит кэш, `--force` для честного прогона.
+
+Ловушки: `\n` в heredoc, апострофы в `it('')`, `cd` в составной команде, `turbo --force` vs `pnpm -- --force`, `CRLF`, `python3` нет — только `node`.
+
+---
+
+## Развёртывание — Docker и systemd
+
+**Docker Compose (рекомендуется, set-and-forget):**
+
+```yaml
+# docker-compose.yml уже в репо
+services:
+  omniproxy:
+    build: { context: ., dockerfile: Containerfile }
+    restart: unless-stopped
+    ports: ["127.0.0.1:8787:8787"]
+    environment: { HOST: "0.0.0.0", PORT: "8787" }
+    volumes: ["omniproxy_data:/home/omniproxy/.omniproxy"]
+    healthcheck: { test: ["CMD","node","-e",".../health..."], interval: 30s }
+volumes: { omniproxy_data: {} }
+```
+
+```bash
 docker compose up -d && docker compose logs -f
-# http://127.0.0.1:8787/health → {"status":"ok"}
+# 0.0.0.0 внутри контейнера, 127.0.0.1 на хосте; без OMNIPROXY_API_KEY внешний bind отклоняется
 ```
 
-**pnpm（源码）：**
+**Без compose:**
 
 ```bash
-git clone https://github.com/shirou-eh/OmniProxy.git && cd OmniProxy
-pnpm install --frozen-lockfile && pnpm run build
-node apps/cli/dist/main.js auth add deepseek-web --field token=...
-node apps/cli/dist/main.js serve --port 8787
-# curl 同上
-node apps/cli/dist/main.js doctor --anonymized  # 用于提 bug，无路径
+docker build -f Containerfile -t omniproxy:0.1.4 .
+docker run -d --restart unless-stopped -p 127.0.0.1:8787:8787 -v omniproxy_data:/home/omniproxy/.omniproxy omniproxy:0.1.4
 ```
 
-密钥接受 `Authorization: Bearer` / `x-api-key` / `x-goog-api-key` / `?key=`。`GET /health|/v1/models|/v1/capabilities` 无需密钥。`0.0.0.0` 无 `--api-key` 会被 **拒绝**。
+**systemd (Linux, bare-metal):**
 
-### 凭证 — 在哪里
-
+```ini
+# /etc/systemd/system/omniproxy.service
+[Unit] Description=OmniProxy gateway / After=network.target
+[Service] User=omniproxy / WorkingDirectory=/opt/OmniProxy
+ExecStart=/usr/bin/node /opt/OmniProxy/apps/cli/dist/main.js serve --port 8787
+Restart=always / Environment=NODE_ENV=production
+[Install] WantedBy=multi-user.target
 ```
-~/.omniproxy/accounts.json  (或 $OMNIPROXY_HOME/accounts.json)
-  0700 目录，0600 文件（仅所有者；Windows ACL）。永不提交。
-  { "deepseek-web": {"token":"…"} }  或  { "qwen-web": [{"id":"work","fields":{"token":"…"}}] }
-```
-
-无 `--field` 且在 TTY 中会交互式询问 `token:`。删除：`rm ~/.omniproxy/accounts.json` 或 `auth remove`。
-
-### 提供商 — 无需 fork
-
-```bash
-omniproxy provider list
-omniproxy capture record deepseek-web --auth ./auth.json
-omniproxy capture sanitize <bundle> && omniproxy capture analyze <bundle> --compare <other>
-omniproxy provider draft <bundle> --out ./out.yaml
-```
-
-你的 `~/.omniproxy/providers/<id>/provider.yaml` **覆盖**内置的。
-
-### 方言 — 自己的协议
-
-`--dialect ./my.mjs` — 导出 `DialectPlugin` 的 JS 模块，挂载在内置之前。
-
-### 文档
-
-同英文表格。原则：**可靠性高于速度**，**用户即法律**。
-
-### 开发
-
-`pnpm install && pnpm run build && pnpm run typecheck && pnpm exec turbo run test --force` — 885 测试。
-
-### 法律
-
-通过你自己的会话驱动网页界面违反大多数 ToS — **账号可能被封**。仅使用你愿意冒险的账号。
 
 ---
 
-MIT. No telemetry, no paywall, no hosted part. Purple rocket — MD3 Expressive.
+## Безопасность и права
+
+- Санитайзер неотключаем (§8.4): `*.raw.json`/`*.har`/`accounts.json` в `.gitignore`, `secrets-scan` в CI, `writeFixture` перепроверяет готовый файл.
+- `serve` вне `127.0.0.1` без `--api-key` **отклоняется**; ключ сравнивается `timingSafeEqual`; `HOST`/`PORT` из env (`HOST`/`PORT`/`OMNIPROXY_HOME` fallback); CORS только `localhost`/`127.0.0.1`/`::1`.
+- Аккаунты: `0700` папка, `0600` файл, `doctor`/`serve` ворнят если `044`; удаление: `rm …/accounts.json` или `auth remove`.
+- `legacy/chrome-extension` — MV3, только `cookies`/`storage`/`downloads`, `chrome.debugger` для CDP, жёлтая плашка — честно.
+
+---
+
+## Юридическая рамка
+
+OmniProxy гоняет **твои** сессии. Это нарушает ToS большинства сервисов — **бан**. Только свои аккаунты, которыми готов рискнуть. Не делает: массовую регистрацию, чужие учётки, обход платных лимитов. MIT, без телеметрии, без hosted-компонента. Подробнее: `LICENSE`, `docs/legal`.
+
+---
+
+## История и принципы
+
+Журнал по PR в `docs/omniproxy/04-phase-1-plan.md` (честно, что нашёл тест) и `CHANGELOG.md`. Тег `baseline-v0.1.0`, симуляторы вместо выдуманных фикстур (ADR-0007), сессии живут **один запрос** (ADR-0008, R-6 закрыт), `ConcurrencyGate` на пару `аккаунт+канал`.
+
+Цели: `gateway availability` при мёртвых провайдерах `100%` (ошибки с `userAction`), `errors_without_user_action` `0`, `lost jobs` `0`, `MTTR "сменилась схема"` `<30m` (правка `yaml`), `overhead p95` `<15ms`, запуск без опциональных deps — обязателен (I-10).
+
+---
+
+<p align="center"><sub>Purple rocket — MD3 Expressive · <code>assets/banner.svg</code> · <code>assets/avatar.svg</code> · shirou-eh/OmniProxy</sub></p>
