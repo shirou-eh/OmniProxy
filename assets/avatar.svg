@@ -1,0 +1,66 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+<title>OmniProxy Avatar — MD3 Expressive — Purple Rocket</title>
+<desc>Purple MD3 Expressive avatar: rocket launching through gateway — OmniProxy universal proxy</desc>
+<rect width="512" height="512" rx="128" fill="#FFFBFE"/>
+<defs>
+  <linearGradient id="p" x1="0%" y1="0%" x2="100%" y2="100%">
+    <stop offset="0%" stop-color="#7C4DFF"/>
+    <stop offset="50%" stop-color="#6B4EFF"/>
+    <stop offset="100%" stop-color="#4A1D96"/>
+  </linearGradient>
+  <linearGradient id="p2" x1="0%" y1="100%" x2="100%" y2="0%">
+    <stop offset="0%" stop-color="#CE93D8" stop-opacity="1"/>
+    <stop offset="100%" stop-color="#7C4DFF" stop-opacity="0"/>
+  </linearGradient>
+  <linearGradient id="flame" x1="0%" y1="0%" x2="0%" y2="100%">
+    <stop offset="0%" stop-color="#FFD600"/>
+    <stop offset="45%" stop-color="#FF6D00"/>
+    <stop offset="100%" stop-color="#7C4DFF" stop-opacity="0"/>
+  </linearGradient>
+  <radialGradient id="glow" cx="50%" cy="40%">
+    <stop offset="0%" stop-color="#B388FF" stop-opacity="0.55"/>
+    <stop offset="100%" stop-color="#7C4DFF" stop-opacity="0"/>
+  </radialGradient>
+</defs>
+<!-- Purple expressive blob -->
+<path d="M 96 256 C 96 138 138 96 256 96 C 374 96 416 138 416 256 C 416 374 374 416 256 416 C 138 416 96 374 96 256 Z" fill="url(#p)"/>
+<ellipse cx="364" cy="148" rx="82" ry="62" fill="url(#p2)" opacity="0.9"/>
+<ellipse cx="364" cy="148" rx="82" ry="62" fill="white" opacity="0.10"/>
+<!-- Soft glow behind rocket -->
+<ellipse cx="256" cy="268" rx="168" ry="168" fill="url(#glow)"/>
+<!-- Rocket — centered, bold, MD3 expressive rounded -->
+<g transform="translate(256 264) rotate(-12)">
+  <!-- Shadow -->
+  <ellipse cx="0" cy="78" rx="44" ry="14" fill="#1C1B1F" opacity="0.16"/>
+  <!-- Flame — expressive, three layers -->
+  <path d="M -22 54 C -26 72 -18 92 0 108 C 18 92 26 72 22 54 Z" fill="url(#flame)" opacity="0.95"/>
+  <path d="M -12 54 C -14 66 -10 78 0 84 C 10 78 14 66 12 54 Z" fill="#FFFFFF" opacity="0.92"/>
+  <!-- Rocket body — pill with squircle top -->
+  <rect x="-38" y="-96" width="76" height="150" rx="38" fill="white"/>
+  <rect x="-38" y="-96" width="76" height="150" rx="38" fill="none" stroke="#1C1B1F" stroke-opacity="0.06" stroke-width="2"/>
+  <!-- Nose cone — purple -->
+  <path d="M -38 -76 C -38 -96 -20 -118 0 -118 C 20 -118 38 -96 38 -76 L -38 -76 Z" fill="url(#p)"/>
+  <path d="M -38 -76 C -38 -96 -20 -118 0 -118 C 20 -118 38 -96 38 -76" fill="none" stroke="white" stroke-opacity="0.18" stroke-width="2"/>
+  <!-- Window — expressive, with highlight -->
+  <circle cx="0" cy="-36" r="26" fill="#1C1B1F"/>
+  <circle cx="0" cy="-36" r="22" fill="#E1BEE7"/>
+  <circle cx="0" cy="-36" r="22" fill="url(#p)" opacity="0.85"/>
+  <circle cx="-7" cy="-42" r="6" fill="white" opacity="0.9"/>
+  <circle cx="0" cy="-36" r="9" fill="white"/>
+  <!-- Fins — expressive, rounded -->
+  <path d="M -38 22 C -58 22 -72 34 -72 54 L -38 54 Z" fill="#4A1D96"/>
+  <path d="M 38 22 C 58 22 72 34 72 54 L 38 54 Z" fill="#4A1D96"/>
+  <!-- Body stripe — purple -->
+  <rect x="-38" y="6" width="76" height="16" rx="8" fill="url(#p)" opacity="0.95"/>
+  <rect x="-38" y="6" width="76" height="8" rx="4" fill="white" opacity="0.14"/>
+  <!-- Small dots — gateway nodes on body -->
+  <circle cx="0" cy="34" r="3.2" fill="#FFD600"/>
+  <circle cx="0" cy="46" r="3.2" fill="white" opacity="0.85"/>
+</g>
+<!-- Stars — expressive, purple -->
+<g fill="white" opacity="0.95">
+  <path d="M 96 108 L 98.5 113.5 L 104 116 L 98.5 118.5 L 96 124 L 93.5 118.5 L 88 116 L 93.5 113.5 Z"/>
+  <path d="M 412 92 L 413.5 96 L 418 97.5 L 413.5 99 L 412 103 L 410.5 99 L 406 97.5 L 410.5 96 Z"/>
+  <path d="M 88 392 L 89.5 395.5 L 93 397 L 89.5 398.5 L 88 402 L 86.5 398.5 L 83 397 L 86.5 395.5 Z" opacity="0.7"/>
+</g>
+</svg>

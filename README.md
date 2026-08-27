@@ -1,4 +1,6 @@
-<!-- Русский ниже / Russian below -->
+![OmniProxy — Universal Gateway — Purple Rocket Banner](assets/banner.svg)
+
+<!-- Русский ниже / Russian below — 中文在下方 -->
 
 # OmniProxy
 
